@@ -47,10 +47,14 @@ class _Lent(TelemetryArm):
 
 class ArmHub:
     def __init__(self, open_arm: Callable[[], Arm] | None, source: str, model_factory: Callable[[], object] | None = None,
-                 poll_s: float = 0.1, stale_after_s: float = 2.0, clock: Callable[[], float] = time.monotonic):
+                 poll_s: float = 0.1, stale_after_s: float = 2.0, clock: Callable[[], float] = time.monotonic,
+                 tune: dict | None = None, gravity_factory: Callable[[], Callable | None] | None = None):
         """open_arm: opens the arm (None = this process never owns it, e.g. the robot agent runs elsewhere).
-        model_factory: returns an ArmModel (FK); None or a failing factory = no 3D frames, joints only."""
+        model_factory: returns an ArmModel (FK); None or a failing factory = no 3D frames, joints only.
+        tune: servo settings applied on every connect, e.g. {"p_gain": 31, "accel": 254} (cell.yaml motion:).
+        gravity_factory: returns the gravity feed-forward (pose -> per-joint offset; real arm only) or None."""
         self._open_arm, self.source = open_arm, source
+        self._tune, self._gravity_factory, self._gravity, self._gravity_done = tune or {}, gravity_factory, None, False
         self._model_factory, self._model, self._model_failed = model_factory, None, False
         self.poll_s, self.stale_after_s, self.clock = poll_s, stale_after_s, clock
         self.arm: Arm | None = None
@@ -75,6 +79,27 @@ class ArmHub:
         return self._model
 
     @property
+    def gravity(self) -> Callable | None:
+        """Gravity feed-forward for Motion / holds (real arm only), built once; None in sim or if unavailable."""
+        if not self._gravity_done:
+            self._gravity_done = True
+            if self._gravity_factory:
+                try:
+                    self._gravity = self._gravity_factory()
+                except Exception as e:  # noqa: BLE001 — e.g. placo missing: hold without it
+                    log.warning("no gravity feed-forward: %s", e)
+        return self._gravity
+
+    def hold_target(self, pose: dict[str, float]) -> dict[str, float]:
+        """Command that keeps the arm AT `pose`: pose + gravity feed-forward on the body joints (servos are
+        P-only, so commanding the measured pose alone lets loaded joints sag a little more)."""
+        g = self.gravity
+        if not g:
+            return dict(pose)
+        offset = g(pose)
+        return {j: v + offset.get(j, 0.0) for j, v in pose.items()}
+
+    @property
     def pan_xy(self) -> np.ndarray | None:
         return None if self.model is None else self.model.pan_xy
 
@@ -91,7 +116,12 @@ class ArmHub:
                 raise ArmBusy("this server doesn't own the arm (the robot agent runs in another process)")
             try:
                 self.arm = self._open_arm()
+                if self._tune:  # same servo stiffness / acceleration as every other arm user (RAM only)
+                    self.arm.tune(**self._tune)
             except Exception as e:  # noqa: BLE001 — port busy / unplugged / calibration missing
+                if self.arm is not None:
+                    self.arm.close(release=False)
+                    self.arm = None
                 self.error = f"couldn't open the arm: {e}"
                 raise ArmBusy(self.error) from e
             self.torque, self.error = True, None
@@ -197,8 +227,8 @@ class ArmHub:
         with self._lock:
             if self.arm is None:
                 raise ArmBusy("arm not connected")
-            if on:  # hold where it is now: goal := present, then enable
-                self.arm.write(self.arm.read())
+            if on:  # hold where it is now (with gravity feed-forward), then enable
+                self.arm.write(self.hold_target(self.arm.read()))
             self.arm.set_torque(on)
             self.torque = on
 

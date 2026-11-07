@@ -47,7 +47,11 @@ def make_hub(args, cfg, own_arm: bool):
     if not own_arm:
         return ArmHub(None, "remote", model)
     if args.robot:
-        return ArmHub(lambda: RealArm(cfg.port, cfg.robot_id, cfg.motion.max_step), "real", model)
+        from ..motion.kinematics import gravity_feedforward
+
+        return ArmHub(lambda: RealArm(cfg.port, cfg.robot_id, cfg.motion.max_step), "real", model,
+                      tune={"p_gain": cfg.motion.servo_p, "accel": cfg.motion.servo_accel},
+                      gravity_factory=lambda: gravity_feedforward(cfg.robot_id, cfg.motion.gravity_gain))
     if cfg.tray:  # simulated arm: never overwrite the real tray calibration
         cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
     return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)

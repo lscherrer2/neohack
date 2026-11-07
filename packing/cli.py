@@ -230,7 +230,14 @@ def cmd_tray_calibrate(s: Session, arm: Arm) -> int:
 
     tray = _tray_or_exit(s)
     model = _load_arm_model(s.cfg)
-    cal = run_tray_calibration(arm, model.tip, tray, s.cfg.catalog, pan_xy=model.pan_xy)
+    arm.tune(p_gain=s.cfg.motion.servo_p, accel=s.cfg.motion.servo_accel)  # holds at the end use the real tuning
+    gravity = None if s.args.sim else gravity_feedforward(s.cfg.robot_id, s.cfg.motion.gravity_gain)
+
+    def hold_target(pose):
+        offset = gravity(pose) if gravity else {}
+        return {j: v + offset.get(j, 0.0) for j, v in pose.items()}
+
+    cal = run_tray_calibration(arm, model.tip, tray, s.cfg.catalog, pan_xy=model.pan_xy, hold_target=hold_target)
     return EXIT_OK if cal else EXIT_STOPPED
 
 

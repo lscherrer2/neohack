@@ -84,17 +84,14 @@ class GotoRunner:
         try:
             with self.hub.borrow(mode="moving", allow=("idle", "calibrating")) as arm:
                 if not arm.torque:  # motors were off for calibration: hold where it is first
-                    arm.write(arm.read())
+                    arm.write(self.hub.hold_target(arm.read()))
                     arm.set_torque(True)
                     self.record("robot", "Motors ON (holding) for a go-to preview")
                 stoppable = _Stoppable(arm, self._stop)
-                gravity = None  # gravity feed-forward is fit on the real arm only
-                if getattr(self.hub, "source", None) == "real":
-                    from ..motion.kinematics import gravity_feedforward
-
-                    gravity = gravity_feedforward(self.cfg.robot_id, self.cfg.motion.gravity_gain)
+                # same tuning as packing: the hub applies servo_p / servo_accel on connect and owns the gravity
+                # feed-forward (real arm only); Motion adds velocity feed-forward + at-rest sag learning itself
                 motion = Motion(stoppable, PoseStore(self.cfg.poses_file), self.cfg.motion, self.cfg.gripper,
-                                sleep=self.sleep, log=log.info, gravity=gravity)
+                                sleep=self.sleep, log=log.info, gravity=getattr(self.hub, "gravity", None))
                 self.record("robot", f"Moving to {name}", point=plan.point)
                 motion.move_to(plan.approach_pose, speed=self.cfg.motion.speed / 2)
                 motion.follow(plan.path, max(1.0, plan.line_mm / 1000 / LINE_SPEED_M_S), name)
@@ -115,6 +112,6 @@ class GotoRunner:
             with self.hub._lock:
                 arm = self.hub.arm
                 if arm is not None:
-                    arm.write(arm.read())
+                    arm.write(self.hub.hold_target(arm.read()))
         except Exception:  # noqa: BLE001
             pass

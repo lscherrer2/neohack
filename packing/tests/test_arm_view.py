@@ -127,6 +127,32 @@ class ArmHubTests(unittest.TestCase):
         self.assertEqual((st["connected"], st["source"], st["mode"]), (True, "remote", "packing"))
         self.assertIsNotNone(st["frames"])
 
+    def test_connect_applies_tuning_and_holds_with_gravity(self):
+        tuned, written = [], []
+
+        class TunedArm(FakeArm):
+            def tune(self, p_gain=None, accel=None):
+                tuned.append((p_gain, accel))
+
+            def write(self, pose):
+                written.append(dict(pose))
+                super().write(pose)
+
+        arm = TunedArm(gain=0.0)  # never drifts toward its target, so reads stay exact
+        hub = ArmHub(lambda: arm, "real", lambda: MODEL, poll_s=0.01, tune={"p_gain": 31, "accel": 254},
+                     gravity_factory=lambda: (lambda pose: {"shoulder_lift": 2.0, "elbow_flex": -1.0}))
+        hub.connect()
+        self.addCleanup(hub.close)
+        self.assertEqual(tuned, [(31, 254)])
+        hub.set_torque(False)
+        hub.set_torque(True)  # hold: measured pose + gravity feed-forward
+        pose = arm.read()
+        self.assertAlmostEqual(written[-1]["shoulder_lift"] - pose["shoulder_lift"], 2.0, delta=1e-9)
+        self.assertAlmostEqual(written[-1]["elbow_flex"] - pose["elbow_flex"], -1.0, delta=1e-9)
+        sim = ArmHub(lambda: FakeArm(), "sim", lambda: MODEL)
+        self.assertIsNone(sim.gravity)
+        self.assertEqual(sim.hold_target({"shoulder_lift": 5.0}), {"shoulder_lift": 5.0})
+
     def test_no_kinematics_degrades_to_joints(self):
         def broken():
             raise ImportError("no placo")

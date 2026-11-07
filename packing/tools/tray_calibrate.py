@@ -50,7 +50,9 @@ def summarize(cal: TrayCalibration, layout: TrayLayout, pan_xy: np.ndarray | Non
 def run_tray_calibration(arm: Arm, tip_fn: Callable[[dict[str, float]], np.ndarray], tray: TrayCfg,
                          names: dict[str, str], pan_xy: np.ndarray | None = None,
                          input_fn: Callable[[str], str] = input, out: Callable[[str], None] = print,
-                         sleep: Callable[[float], None] = time.sleep) -> TrayCalibration | None:
+                         sleep: Callable[[float], None] = time.sleep,
+                         hold_target: Callable[[dict[str, float]], dict[str, float]] | None = None
+                         ) -> TrayCalibration | None:
     """Interactive calibration. Returns the saved calibration, or None if cancelled / rejected."""
     from ..tray.session import CORNER_ORDER
 
@@ -105,5 +107,6 @@ def run_tray_calibration(arm: Arm, tip_fn: Callable[[dict[str, float]], np.ndarr
         return None
     finally:
         out("Hold the arm: motors turning back ON at the current position.")
-        arm.write(arm.read())
+        pose = arm.read()
+        arm.write(hold_target(pose) if hold_target else pose)  # + gravity feed-forward on the real arm
         arm.set_torque(True)

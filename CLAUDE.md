@@ -135,6 +135,10 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   (`packing.tests.test_tray.temp_config`) so they don't write the real databases / calibration.
 - **Arm ownership**: `shop/arm_hub.py` `ArmHub` owns the arm in the server process (real with `--robot`, FakeArm
   otherwise; connects on demand, polls ~10 Hz, FK frames). Modes: idle / calibrating / packing / moving (go-to).
+  On connect it applies `servo_p` / `servo_accel` (like every other arm user) and it owns the gravity feed-forward
+  (`hub.gravity`, real arm only): go-to `Motion`s use it, and holds (motors back on, Stop) command
+  `hub.hold_target(pose)` = pose + gravity offset so the arm doesn't sag. New arm users must do the same:
+  `arm.tune(...)` + `Motion(..., gravity=gravity_feedforward(...))` on the real arm.
   In-process packing borrows it (`RobotPacker(arm_provider=hub.borrow)`); `shop/goto_runner.py` borrows it for
   go-to moves; a separate `robot --robot` process opens its own arm and posts `/robot/telemetry`. Torque off only
   after a `confirm_hold` from the UI, motion only after `confirm_move`; `/robot/claim` hands out nothing while
