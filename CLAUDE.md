@@ -25,11 +25,12 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
   before that are ~7° off on lift/elbow — re-teach.
 - Units: body joints -100..100 (0 = calibration mid pose = `home`), gripper 0..100.
   Shoulder/elbow sag ~5 units under gravity when holding a pose.
-- Tracking (Nov 2026, measured by tracing `Motion` ticks): servos are P-only (P=24 via `servo_p`) and trail a
+- Tracking (Nov 2026, measured by tracing `Motion` ticks): servos are P-only (P=31 via `servo_p`; was 24 — 31 tracked best of 17/24/31) and trail a
   moving command by ~0.1 s, and gravity makes joints sag ~1-2 units (more mid-move: static friction hides part
   of it at rest). Motion stack, all in `cell.yaml` `motion:`: `servo_accel: 254` (20 doubled lag — the servo's
-  own profile fights our streamed trajectory) · `lead_s: 0.1` velocity feed-forward · `gravity_gain: 4.15`
-  units/N·m model gravity feed-forward (fit: shoulder 4.17, elbow 4.12, residual ≤0.2 units; real arm only) ·
+  own profile fights our streamed trajectory) · `lead_s: 0.077` velocity feed-forward (0.1 s measured at P=24, scaled) · `gravity_gain: 3.21`
+  units/N·m model gravity feed-forward (fit at P=24: shoulder 4.17, elbow 4.12, residual ≤0.2 units; scaled by
+  24/31 for P=31 — sag and lag go ~1/P; re-fit if P changes; real arm only) ·
   sag integral `bias` learns **only at rest** (learning lag mid-move caused overshoot / flailing) ·
   `settle_tol: 1`. Result: joints in step within ~3 %, lag ~1 unit, 50 mm IK line within ~5 mm.
 - Directions (Nov 2026): gripper 0 = closed, 100 = open; `elbow_flex` + = forearm down; `wrist_flex` + = gripper
