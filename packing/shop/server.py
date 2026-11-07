@@ -15,7 +15,8 @@
   GET  /dashboard/              React app (packing/shop/web, built into static/app): Orders + Calibration tabs
   GET  /api/arm  /api/arm/stream   live arm state (joints, FK link frames, tip); POST /api/arm/connect|disconnect
   GET  /api/arm/preview[/{name}]  generic poses drawn without an arm (dashboard preview toggle)
-  /api/calibration[...]         tray calibration from the dashboard (start, capture, points, save, finish)
+  /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
+                                save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
 """
 
@@ -116,7 +117,11 @@ class ConfirmIn(BaseModel):
 
 
 class CaptureIn(BaseModel):
-    pocket: str
+    pocket: str  # a pocket id or a plate corner id (corner_bl / corner_tl / corner_br / corner_tr)
+
+
+class ModeIn(BaseModel):
+    mode: str  # corners | pockets
 
 
 class DoneIn(BaseModel):
@@ -243,6 +248,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     @app.get("/api/tray")
     def tray_state():
         from ..tray.calibration import tilt_deg
+        from ..tray.session import corner_label
 
         tray = _tray()
         layout, full, cal = tray.layout(), shelf.full_slots(), tray.calibration()
@@ -257,6 +263,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             "outline": layout.outline, "unmatched": layout.unmatched, "protrusion_mm": tray.protrusion_mm,
             "types": [{"sku": t.sku, "name": t.name, "feature": t.feature, "grip_axis": t.grip_axis} for t in tray.types],
             "pockets": pockets,
+            "corners": [{"id": cid, "label": corner_label(layout, cid), "x": x, "y": y}
+                        for cid, (x, y) in layout.corners().items()],
             "calibration": None if cal is None else {
                 "created": cal.created, "rms_mm": cal.rms_mm, "tilt_deg": round(tilt_deg(cal), 1),
                 "matrix": cal.matrix(), "reference_points": [p.pocket for p in cal.points]},
@@ -389,13 +397,22 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         if not sess.active or h.mode != "calibrating":
             raise HTTPException(409, "start calibration first (motors off)")
         try:
-            sess.layout.pocket(body.pocket)
+            sess.layout.point(body.pocket)
         except KeyError as e:
-            raise HTTPException(404, f"no pocket {body.pocket}") from e
+            raise HTTPException(404, f"no pocket or corner {body.pocket}") from e
         try:
             sess.capture(body.pocket, h.read_tip())
         except ArmBusy as e:
             raise HTTPException(409, str(e)) from e
+        return sess.to_dict()
+
+    @app.post("/api/calibration/mode")
+    def calibration_mode(body: ModeIn):
+        sess = _session()
+        try:
+            sess.set_mode(body.mode)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
         return sess.to_dict()
 
     @app.delete("/api/calibration/points/{pocket_id}")

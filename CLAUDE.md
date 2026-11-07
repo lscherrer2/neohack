@@ -84,9 +84,11 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - Tray frame = DXF x/y, z out of the face; DXF x runs left→right as seen from the arm. Grip: fingers close along
   tray x for all but the breadboard (tray y). Catalog names come from the tray types; `part_slots` is empty;
   one item per order (`box_slots` has one slot). `cfg.stock_slots` = part_slots + tray pockets.
-- Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`) to the reference pocket centers
-  (Bottom-left `aa_1`, Top-left `aa_7`, Bottom-right `breadboard_1`, Top-right `breadboard_5`) → scipy rigid fit,
-  refused above 3 mm RMS. CLI `tray-calibrate` or the dashboard Calibration tab. Sim saves `sim_tray_cal.json`.
+- Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
+  points → scipy rigid fit, refused above 3 mm RMS. `tray.calibration_mode`: **corners** (default; the middle of each
+  rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
+  (`reference_points`: `aa_1`, `aa_7`, `breadboard_1`, `breadboard_5`). Any pocket/corner can be added as an extra
+  point. CLI `tray-calibrate` or the dashboard Calibration tab (Corners/Pockets switch). Sim saves `sim_tray_cal.json`.
 - 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
   report shows the worst angle per item. Picking from pockets (`Cell`) is **not implemented yet**; nor box/drop spot.
 
@@ -120,7 +122,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   SSE `/api/events/stream`, in-memory `events.EventLog`, last 500) and **Calibration** (3D arm + tray view from
   `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, capture
   buttons per reference corner + any pocket, live fit, Save/Finish). API contract: `.claude/plans/arm_viz.md`.
-  3D arm = stick figure through the joint axes (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Avoid CSS class names that equal event kinds
+  3D arm = stick figure (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Joints are
+  projected into the arm's vertical plane (URDF lift/elbow/wrist origins sit 18.3 mm along their axes — fake jogs
+  otherwise); the tool point is the true FK position. Avoid CSS class names that equal event kinds
   (`tool/robot/order/chat/error/system`) — they collide with the activity list styles.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
 

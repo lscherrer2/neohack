@@ -64,8 +64,16 @@ function Base() {
 function Arm({ arm, stale }: { arm: ArmState; stale: boolean }) {
   const f = arm.frames!;
   const color = stale ? C.ghost : C.ink, accent = stale ? C.ghost : C.steel;
+  // The arm moves in ONE vertical plane: through the pan axis, turned by the pan joint. The URDF frame origins
+  // of the lift/elbow/wrist joints sit ~18 mm along their own (horizontal) axes, which doesn't change the motion
+  // but would draw fake sideways jogs — so joints are projected into that plane. The tool point (red dot) is
+  // the true FK position and is not projected.
+  const pan = origin(f.shoulder_link ?? f.base_link);
+  const lift = f.upper_arm_link;
+  const n = lift ? new THREE.Vector3(lift[0][2], lift[1][2], lift[2][2]).normalize() : null; // shoulder-lift axis
+  const inPlane = (p: THREE.Vector3) => (n ? p.clone().sub(n.clone().multiplyScalar(n.dot(p.clone().sub(pan)))) : p);
   const chain = [new THREE.Vector3(PAN_AXIS[0], PAN_AXIS[1], 0),
-                 ...CHAIN.filter((l) => f[l]).map((l) => origin(f[l]))];
+                 ...CHAIN.filter((l) => f[l]).map((l) => (l === "gripper_frame_link" ? origin(f[l]) : inPlane(origin(f[l]))))];
   const arcs = BENDS.map((l) => {
     const i = CHAIN.indexOf(l) + 1; // +1: chain[0] is the base point
     return f[l] && chain[i - 1] && chain[i + 1] ? arcPoints(chain[i - 1], chain[i], chain[i + 1]) : [];
@@ -74,7 +82,7 @@ function Arm({ arm, stale }: { arm: ArmState; stale: boolean }) {
   // so it forms a V with the fixed finger that closes as the gripper closes.
   let jaw: THREE.Vector3[] | null = null;
   if (f[JAW] && f.gripper_link && f.gripper_frame_link) {
-    const g0 = origin(f.gripper_link), g1 = origin(f.gripper_frame_link);
+    const g0 = inPlane(origin(f.gripper_link)), g1 = origin(f.gripper_frame_link);
     const along = new THREE.Line3(g0, g1).closestPointToPoint(inFrame(f[JAW], JAW_PIVOT), true, new THREE.Vector3());
     jaw = [along, inFrame(f[JAW], JAW_TIP)];
   }
@@ -118,6 +126,15 @@ function roundedRect(o: TrayState["outline"]): THREE.Shape {
   s.lineTo(o.xmin, o.ymin + r);
   s.quadraticCurveTo(o.xmin, o.ymin, o.xmin + r, o.ymin);
   return s;
+}
+
+/** A calibration reference point on the tray (pocket or plate corner): position (mm) + highlight ring radius. */
+function refPoint(tray: TrayState, id: string | null): { id: string; x: number; y: number; r: number } | undefined {
+  if (!id) return undefined;
+  const c = (tray.corners ?? []).find((k) => k.id === id);
+  if (c) return { id, x: c.x, y: c.y, r: 3 };
+  const p = tray.pockets.find((k) => k.id === id);
+  return p && { id, x: p.x, y: p.y, r: pocketRadius(p) };
 }
 
 const pocketRadius = (p: Pocket) => (p.shape.kind === "circle" ? p.shape.d / 2 : p.shape.kind === "rect" ? Math.max(p.shape.w, p.shape.h) / 2 : 6);
@@ -167,7 +184,7 @@ function Tray({ tray, matrix, ghost, highlighted }: { tray: TrayState; matrix: M
   const m = useMemo(() => toMatrix(matrix), [matrix]);
   const shape = useMemo(() => roundedRect(tray.outline), [tray.outline]);
   const colors = useMemo(() => Object.fromEntries(tray.types.map((t, i) => [t.sku, itemColor(i)])), [tray.types]);
-  const hp = highlighted ? tray.pockets.find((p) => p.id === highlighted) : undefined;
+  const hp = refPoint(tray, highlighted);
   return (
     <group matrix={m} matrixAutoUpdate={false}>
       <group scale={0.001}>
@@ -178,10 +195,14 @@ function Tray({ tray, matrix, ghost, highlighted }: { tray: TrayState; matrix: M
         {tray.pockets.map((p) => (
           <PocketMesh key={p.id} p={p} color={colors[p.sku] ?? C.ghost} prot={tray.protrusion_mm} ghost={ghost} />
         ))}
+        {(tray.corners ?? []).map((c) => (
+          <Line key={c.id} points={[[c.x - 3, c.y - 3, 0.5], [c.x + 3, c.y + 3, 0.5], [c.x, c.y, 0.5], [c.x - 3, c.y + 3, 0.5], [c.x + 3, c.y - 3, 0.5]]}
+                color={C.steel} lineWidth={1.5} />
+        ))}
         {hp && (
           <group position={[hp.x, hp.y, 0.6]}>
             <mesh>
-              <ringGeometry args={[pocketRadius(hp) + 2, pocketRadius(hp) + 5, 40]} />
+              <ringGeometry args={[hp.r + 2, hp.r + 5, 40]} />
               <meshBasicMaterial color={C.safety} side={THREE.DoubleSide} />
             </mesh>
           </group>
@@ -243,7 +264,7 @@ export default function Scene({ arm, stale, tray, session, highlighted }: {
     if (!tray.calibration)
       labels.push({ key: "ghost", text: "Tray not calibrated — position is a guess", cls: "ghost-label",
                     pos: trayToWorld(trayMatrix, (o.xmin + o.xmax) / 2, (o.ymin + o.ymax) / 2, 30) });
-    const hp = highlighted ? tray.pockets.find((p) => p.id === highlighted) : undefined;
+    const hp = refPoint(tray, highlighted);
     if (hp) labels.push({ key: "target", text: hp.id, cls: "target-label",
                           pos: trayToWorld(trayMatrix, hp.x, hp.y, tray.protrusion_mm + 10) });
   }

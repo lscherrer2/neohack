@@ -48,7 +48,8 @@ class TrayCfg:
     dxf: Path
     calibration_file: Path
     types: list[TrayType]
-    reference_points: list[str]  # pockets touched during calibration (>= 3, spread out)
+    reference_points: list[str]  # pockets touched in "pockets" calibration mode (>= 3, spread out)
+    calibration_mode: str = "corners"  # corners: touch the 4 plate corners | pockets: touch reference_points
     protrusion_mm: float = 10.0  # how far every item sticks out of the tray face
     extract_mm: float = 120.0  # pull straight out along the tray normal at least this far
     approach_mm: float = 30.0  # stand-off above the item top before the final straight approach
@@ -137,6 +138,15 @@ def load_config(path: str | Path) -> CellConfig:
     return cfg
 
 
+CALIBRATION_MODES = ("corners", "pockets")
+
+
+def _mode(mode: str) -> str:
+    if mode not in CALIBRATION_MODES:
+        raise ValueError(f"tray.calibration_mode must be one of {CALIBRATION_MODES}, not {mode!r}")
+    return mode
+
+
 def _load_tray(raw: dict | None, rel) -> TrayCfg | None:
     if not raw:
         return None
@@ -148,6 +158,7 @@ def _load_tray(raw: dict | None, rel) -> TrayCfg | None:
         calibration_file=rel(raw.get("calibration_file", "data/tray_cal.json")),
         types=types,
         reference_points=list(raw.get("reference_points") or []),
+        calibration_mode=_mode(raw.get("calibration_mode", "corners")),
         protrusion_mm=float(raw.get("protrusion_mm", 10.0)),
         extract_mm=float(raw.get("extract_mm", 120.0)),
         approach_mm=float(raw.get("approach_mm", 30.0)),

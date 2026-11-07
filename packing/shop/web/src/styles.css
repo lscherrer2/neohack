@@ -211,3 +211,8 @@ dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
 .sim-note { margin: 8px 0; padding: 8px 10px; background: #FFF4CC; border: 1px solid var(--safety); border-radius: 4px;
             font-size: .85rem; }
 .sim-note code { font-size: .8rem; }
+
+.mode-switch { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; margin: 4px 0 8px; }
+.mode-switch button { font: inherit; padding: 5px 12px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.mode-switch button + button { border-left: 1px solid var(--rule); }
+.mode-switch button.on { background: var(--steel); color: #fff; }

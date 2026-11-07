@@ -21,6 +21,10 @@ SAMPLES = 5  # joint reads averaged per point (hand tremor)
 
 
 def describe_pocket(layout: TrayLayout, pocket_id: str, names: dict[str, str]) -> str:
+    if pocket_id.startswith("corner_"):
+        from ..tray.session import corner_label
+
+        return f"{pocket_id} — {corner_label(layout, pocket_id)} of the plate (middle of the rounded corner, top edge)"
     p = layout.pocket(pocket_id)
     rows = [q for q in layout.pockets if q.sku == p.sku]
     n = rows.index(p) + 1
@@ -48,14 +52,19 @@ def run_tray_calibration(arm: Arm, tip_fn: Callable[[dict[str, float]], np.ndarr
                          input_fn: Callable[[str], str] = input, out: Callable[[str], None] = print,
                          sleep: Callable[[float], None] = time.sleep) -> TrayCalibration | None:
     """Interactive calibration. Returns the saved calibration, or None if cancelled / rejected."""
+    from ..tray.session import CORNER_ORDER
+
     layout = tray.layout()
-    refs = tray.reference_points
+    corners = tray.calibration_mode == "corners"
+    refs = CORNER_ORDER if corners else tray.reference_points
     if len(refs) < 3:
         raise CalibrationError("tray.reference_points needs at least 3 pockets")
     for pid in refs:
-        layout.pocket(pid)  # KeyError early for a typo
+        layout.point(pid)  # KeyError early for a typo
 
-    out("Tray calibration: put the gripper tip (closed) on the CENTER of each pocket below, at the tray face.")
+    out("Tray calibration: put the gripper tip (closed) on " + (
+        "each plate CORNER below (middle of the rounded corner, at the top face's edge)." if corners
+        else "the CENTER of each pocket below, at the tray face."))
     input_fn("Motors are about to turn OFF — hold the arm, then press Enter...")
     arm.set_torque(False)
     measured: list[tuple[str, tuple[float, float], np.ndarray]] = []
@@ -78,8 +87,7 @@ def run_tray_calibration(arm: Arm, tip_fn: Callable[[dict[str, float]], np.ndarr
                 sleep(0.02)
             pose = {j: float(np.mean([r[j] for r in reads])) for j in reads[0]}
             tip = np.asarray(tip_fn(pose), float)
-            p = layout.pocket(pid)
-            measured.append((pid, (p.x, p.y), tip))
+            measured.append((pid, layout.point(pid), tip))
             out(f"    {pid}: tip at ({tip[0] * 1000:.1f}, {tip[1] * 1000:.1f}, {tip[2] * 1000:.1f}) mm")
 
         try:

@@ -102,7 +102,15 @@ export interface TrayState {
   protrusion_mm: number;
   types: TrayType[];
   pockets: Pocket[];
+  corners: TrayCorner[]; // plate corner reference points (middle of each rounded corner)
   calibration: TrayCalibration | null;
+}
+
+export interface TrayCorner {
+  id: string; // corner_bl | corner_tl | corner_br | corner_tr
+  label: string; // "Bottom-left corner" (bottom = nearest the arm)
+  x: number; // mm, tray frame
+  y: number;
 }
 
 // ---------- arm
@@ -147,6 +155,7 @@ export interface CalFit {
 
 export interface CalSession {
   active: boolean;
+  mode: "corners" | "pockets"; // which reference points the capture buttons use
   reference_points: CalReference[];
   points: CalPoint[];
   fit: CalFit | null;

@@ -14,11 +14,18 @@ from .calibration import (MAX_RMS_MM, CalibrationError, TrayCalibration, approac
 from .layout import TrayLayout
 
 
-def corner_label(layout: TrayLayout, pocket_id: str) -> str:
-    """'Bottom-left' etc. as seen from the arm: bottom = nearest the arm (low DXF y), left = low DXF x."""
-    p, o = layout.pocket(pocket_id), layout.outline
+MODES = ("corners", "pockets")
+CORNER_ORDER = ["corner_bl", "corner_tl", "corner_br", "corner_tr"]
+
+
+def corner_label(layout: TrayLayout, point_id: str) -> str:
+    """'Bottom-left' etc. as seen from the arm: bottom = nearest the arm (low DXF y), left = low DXF x.
+    Plate corners get ' corner' appended."""
+    x, y = layout.point(point_id)
+    o = layout.outline
     cx, cy = (o["xmin"] + o["xmax"]) / 2, (o["ymin"] + o["ymax"]) / 2
-    return f"{'Bottom' if p.y < cy else 'Top'}-{'left' if p.x < cx else 'right'}"
+    label = f"{'Bottom' if y < cy else 'Top'}-{'left' if x < cx else 'right'}"
+    return f"{label} corner" if point_id.startswith("corner_") else label
 
 
 class CalibrationSession:
@@ -26,13 +33,25 @@ class CalibrationSession:
         self.tray, self.pan_xy = tray, pan_xy
         self.layout: TrayLayout = tray.layout()
         self.active = False
-        self.points: dict[str, np.ndarray] = {}  # pocket id -> measured tip (robot frame, m), in capture order
+        self.mode = tray.calibration_mode if tray.calibration_mode in MODES else "corners"
+        self.points: dict[str, np.ndarray] = {}  # point id -> measured tip (robot frame, m), in capture order
+
+    @property
+    def refs(self) -> list[str]:
+        """Reference points for the current mode: the 4 plate corners, or the configured pockets."""
+        return CORNER_ORDER if self.mode == "corners" else list(self.tray.reference_points)
+
+    def set_mode(self, mode: str) -> None:
+        """Switch corners/pockets. Captured points are kept (any point can be part of the fit)."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        self.mode = mode
 
     # ---------- points ----------
-    def capture(self, pocket_id: str, tip_m: np.ndarray) -> None:
-        self.layout.pocket(pocket_id)  # KeyError for unknown pockets
-        self.points.pop(pocket_id, None)
-        self.points[pocket_id] = np.asarray(tip_m, float)
+    def capture(self, point_id: str, tip_m: np.ndarray) -> None:
+        self.layout.point(point_id)  # KeyError for unknown pockets / corners
+        self.points.pop(point_id, None)
+        self.points[point_id] = np.asarray(tip_m, float)
 
     def remove(self, pocket_id: str) -> None:
         self.points.pop(pocket_id, None)
@@ -43,7 +62,7 @@ class CalibrationSession:
 
     # ---------- fit ----------
     def _measured(self):
-        return [(pid, (self.layout.pocket(pid).x, self.layout.pocket(pid).y), tip) for pid, tip in self.points.items()]
+        return [(pid, self.layout.point(pid), tip) for pid, tip in self.points.items()]
 
     def _fit(self) -> tuple[TrayCalibration | None, str | None]:
         if len(self.points) < 3:
@@ -69,7 +88,7 @@ class CalibrationSession:
     def to_dict(self) -> dict:
         cal, error = self._fit()
         residual = {p.pocket: p.residual_mm for p in cal.points} if cal else {}
-        refs = self.tray.reference_points
+        refs = self.refs
         fit = None
         if cal is not None or len(self.points) >= 3:
             fit = {"ok": cal is not None and error is None, "error": error,
@@ -84,10 +103,11 @@ class CalibrationSession:
         saved = self.tray.calibration()
         return {
             "active": self.active,
+            "mode": self.mode,
             "reference_points": [{"pocket": pid, "label": corner_label(self.layout, pid), "captured": pid in self.points}
                                  for pid in refs],
             "points": [{"pocket": pid, "label": corner_label(self.layout, pid) if pid in refs else None,
-                        "tray_mm": [self.layout.pocket(pid).x, self.layout.pocket(pid).y],
+                        "tray_mm": list(self.layout.point(pid)),
                         "robot_m": [round(float(v), 5) for v in tip], "residual_mm": residual.get(pid)}
                        for pid, tip in self.points.items()],
             "fit": fit,

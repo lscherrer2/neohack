@@ -78,6 +78,23 @@ class TrayLayout:
         """pocket id -> sku (the inventory's part slots)."""
         return {p.id: p.sku for p in self.pockets}
 
+    def corners(self) -> dict[str, tuple[float, float]]:
+        """Plate corner reference points (mm): the middle of each rounded corner, on the plate edge.
+        (The sharp corner itself is in mid-air when the corners are rounded.) Bottom = nearest the arm."""
+        o, r = self.outline, self.outline.get("corner_r", 0.0)
+        k = r * (1 - 1 / math.sqrt(2))  # inset of the arc midpoint from the sharp corner, along x and y
+        x0, x1, y0, y1 = o["xmin"] + k, o["xmax"] - k, o["ymin"] + k, o["ymax"] - k
+        return {"corner_bl": (round(x0, 3), round(y0, 3)), "corner_tl": (round(x0, 3), round(y1, 3)),
+                "corner_br": (round(x1, 3), round(y0, 3)), "corner_tr": (round(x1, 3), round(y1, 3))}
+
+    def point(self, point_id: str) -> tuple[float, float]:
+        """Tray-frame (x, y) mm of a calibration reference point: a pocket id or a corner id."""
+        corners = self.corners()
+        if point_id in corners:
+            return corners[point_id]
+        p = self.pocket(point_id)
+        return p.x, p.y
+
 
 def _near(a: float, b: float) -> bool:
     return abs(a - b) <= TOL_MM

@@ -121,7 +121,19 @@ export default function Panel(p: Props) {
               </>
             ) : (
               <>
-                <p className="sub">Guide the tip onto the center of each pocket, hold still, then press its button.</p>
+                <div className="mode-switch" role="group" aria-label="Reference points">
+                  {(["corners", "pockets"] as const).map((m) => (
+                    <button key={m} type="button" className={s.mode === m ? "on" : ""} aria-pressed={s.mode === m}
+                            disabled={busy !== null} onClick={() => run(`mode:${m}`, "POST", "/api/calibration/mode", { mode: m })}>
+                      {m === "corners" ? "Plate corners" : "Pocket centers"}
+                    </button>
+                  ))}
+                </div>
+                <p className="sub">
+                  {s.mode === "corners"
+                    ? "Hold the tip (red dot) to the middle of each rounded plate corner, on the top edge, then press its button."
+                    : "Guide the tip (red dot) onto the center of each pocket, at the tray face, then press its button."}
+                </p>
                 <div className="captures">
                   {s.reference_points.map((r) => {
                     const pt = pointFor(r.pocket);
@@ -148,10 +160,17 @@ export default function Panel(p: Props) {
                   <label htmlFor="extra-pocket">Extra point</label>
                   <select id="extra-pocket" value={extra}
                           onChange={(e) => { setExtra(e.target.value); p.setTarget(e.target.value || null); }}>
-                    <option value="">Choose a pocket…</option>
-                    {(tray?.pockets ?? []).map((pk) => (
-                      <option key={pk.id} value={pk.id}>{pk.id}{pointFor(pk.id) ? " ✓" : ""}</option>
-                    ))}
+                    <option value="">Choose a point…</option>
+                    <optgroup label="Plate corners">
+                      {(tray?.corners ?? []).map((c) => (
+                        <option key={c.id} value={c.id}>{c.label}{pointFor(c.id) ? " ✓" : ""}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Pockets">
+                      {(tray?.pockets ?? []).map((pk) => (
+                        <option key={pk.id} value={pk.id}>{pk.id}{pointFor(pk.id) ? " ✓" : ""}</option>
+                      ))}
+                    </optgroup>
                   </select>
                   <button className="act" disabled={!extra || busy !== null} onClick={() => capture(extra)}>Capture</button>
                 </div>

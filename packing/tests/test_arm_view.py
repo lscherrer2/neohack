@@ -146,6 +146,10 @@ class SessionTests(unittest.TestCase):
             self.assertEqual([corner_label(layout, p) for p in cfg.tray.reference_points],
                              ["Bottom-left", "Top-left", "Bottom-right", "Top-right"])
             sess = CalibrationSession(cfg.tray, pan_xy=np.array([0.0388, 0.0]))
+            self.assertEqual(sess.to_dict()["mode"], "corners")
+            self.assertEqual([r["label"] for r in sess.to_dict()["reference_points"]],
+                             ["Bottom-left corner", "Top-left corner", "Bottom-right corner", "Top-right corner"])
+            sess.set_mode("pockets")
             self.assertIsNone(sess.to_dict()["fit"])
             R, t = tilted_pose()
             for pid, xy in CalibrationTests.REFS[:3]:
@@ -214,6 +218,25 @@ class CalibrationApiTests(unittest.TestCase):
         self.assertFalse(r["active"])
         self.assertTrue(self.arm.torque)
         self.assertEqual(self.http.get("/api/arm").json()["mode"], "idle")
+
+    def test_corners_mode_over_api(self):
+        layout = self.cfg.tray.layout()
+        R, t = tilted_pose()
+        corners = ["corner_bl", "corner_tl", "corner_br", "corner_tr"]
+        truth = {i: R @ (np.array([*layout.point(c), 0]) * 0.001) + t for i, c in enumerate(corners)}
+        self.hub._model = FakeTipModel(truth)
+        r = self.http.post("/api/calibration/start", json={"confirm_hold": True}).json()
+        self.assertEqual((r["mode"], [p["pocket"] for p in r["reference_points"]]), ("corners", corners))
+        for i, c in enumerate(corners):
+            self.put_tip_at(i)
+            r = self.http.post("/api/calibration/capture", json={"pocket": c}).json()
+        self.assertTrue(r["fit"]["ok"])
+        self.assertEqual(self.http.post("/api/calibration/mode", json={"mode": "bogus"}).status_code, 400)
+        r = self.http.post("/api/calibration/mode", json={"mode": "pockets"}).json()
+        self.assertEqual(r["reference_points"][0]["pocket"], "aa_1")
+        self.assertEqual(len(r["points"]), 4)  # captured corners are kept
+        tray = self.http.get("/api/tray").json()
+        self.assertEqual([c["id"] for c in tray["corners"]], ["corner_bl", "corner_tl", "corner_br", "corner_tr"])
 
     def test_save_refused_without_good_fit(self):
         self.http.post("/api/calibration/start", json={"confirm_hold": True})

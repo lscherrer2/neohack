@@ -161,6 +161,7 @@ class HandGuidedFlowTests(unittest.TestCase):
     def test_flow_with_redo_and_save(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = load_config(temp_config(Path(d)))
+            cfg.tray.calibration_mode = "pockets"
             layout = cfg.tray.layout()
             R, t = tilted_pose()
             truth = {i: R @ (np.array([layout.pocket(pid).x, layout.pocket(pid).y, 0]) * 0.001) + t
@@ -191,6 +192,33 @@ class HandGuidedFlowTests(unittest.TestCase):
             self.assertTrue(cfg.tray.calibration_file.exists())
             self.assertTrue(arm.torque)  # motors back on at the end
             self.assertTrue(any("worst grip angle" in line for line in out))
+
+    def test_corners_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = load_config(temp_config(Path(d)))
+            self.assertEqual(cfg.tray.calibration_mode, "corners")
+            layout = cfg.tray.layout()
+            corners = layout.corners()
+            self.assertEqual(corners["corner_bl"], (-9.185, -9.185))  # middle of the R12 corner arc
+            R, t = tilted_pose()
+            order = ["corner_bl", "corner_tl", "corner_br", "corner_tr"]
+            truth = {i: R @ (np.array([*corners[c], 0]) * 0.001) + t for i, c in enumerate(order)}
+            arm = FakeArm()
+            prompts, script = [], iter(["", 0, 1, 2, 3, "y"])
+
+            def input_fn(prompt):
+                prompts.append(prompt)
+                step = next(script)
+                if isinstance(step, int):
+                    arm.pos = arm.target = {**arm.pos, "shoulder_pan": float(step)}
+                    return ""
+                return step
+
+            cal = run_tray_calibration(arm, lambda pose: truth[round(pose["shoulder_pan"])], cfg.tray, cfg.catalog,
+                                       input_fn=input_fn, out=lambda s: None, sleep=lambda s: None)
+            self.assertLess(cal.rms_mm, 0.01)
+            self.assertIn("Bottom-left corner", prompts[1])
+            np.testing.assert_allclose(cal.rot, R, atol=1e-6)
 
     def test_quit_saves_nothing(self):
         with tempfile.TemporaryDirectory() as d:

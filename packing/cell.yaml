@@ -27,7 +27,8 @@ tray:
   protrusion_mm: 10        # every item sticks out this far above the tray face
   extract_mm: 120          # pull straight out at least this far (glue stick length)
   approach_mm: 30
-  reference_points: [aa_1, aa_7, breadboard_1, breadboard_5]   # touched with the tip during calibration
+  calibration_mode: corners   # corners: touch the middle of each rounded plate corner | pockets: reference_points
+  reference_points: [aa_1, aa_7, breadboard_1, breadboard_5]   # pocket centers touched in "pockets" mode
   types:                   # sku: DXF feature (mm) + which tray axis the fingers close along
     aa:         {name: AA battery,    feature: circle,   size: 15.5,        grip_axis: x}
     9v:         {name: 9V battery,    feature: rect,     size: [27.5, 18.5], grip_axis: x}
