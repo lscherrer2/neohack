@@ -4,9 +4,11 @@ Joint-space move (Motion.move_to): every joint interpolates A->B; the gripper ti
 Linear move (this module):        the tip position interpolates A->B in a STRAIGHT LINE (orientation
                                    slerps), IK converts each point on the line back into joint values.
 
-Units: the arm runs in calibrated -100..100 units; the URDF works in degrees with 0 = calibration
-mid-pose. ArmModel converts with the calibration ranges (same formula as LeRobot's DEGREES mode).
-Accuracy depends on how close your calibration mid-pose was to the URDF zero pose — expect a few mm.
+Units: the arm runs in calibrated -100..100 units (0 = middle of each joint's recorded range); the URDF works in
+degrees with 0 = the URDF zero pose = the pose held during `calibrate center` (servo reads HALF_TURN there).
+ArmModel converts with the calibration ranges: deg = (raw - HALF_TURN) * 360 / MAX_RES. The range middles are
+NOT the center pose (the SO-101's joint limits are asymmetric: up to ~9° apart), so the old LeRobot-style
+mapping (0 deg = range middle) put the tip centimeters off. Remaining error = how well the center pose was held.
 """
 
 from __future__ import annotations
@@ -19,18 +21,19 @@ from ..joints import BODY
 
 URDF = Path(__file__).resolve().parent.parent / "urdf" / "so101_new_calib.urdf"
 MAX_RES = 4095  # servo encoder steps per revolution, minus one
+HALF_TURN = 2047  # raw reading at the calibration center pose (= URDF zero), see tools/calibrate.py
 
 
 class PathError(RuntimeError):
     """Line can't be followed (unreachable, joint limit, or IK jump)."""
 
 
-def load_ranges(robot_id: str) -> dict[str, tuple[int, int]]:
-    """Calibrated (range_min, range_max) servo ticks of each body joint, from the robot's calibration file."""
+def load_ranges(robot_id: str) -> dict[str, tuple[int, int, int]]:
+    """Calibrated (range_min, range_max, drive_mode) of each body joint, from the robot's calibration file."""
     from ..hardware.so101 import load_calibration
 
     cal = load_calibration(robot_id)
-    return {j: (cal[j].range_min, cal[j].range_max) for j in BODY}
+    return {j: (cal[j].range_min, cal[j].range_max, cal[j].drive_mode) for j in BODY}
 
 
 class PlacoKinematics:
@@ -104,10 +107,16 @@ def _slerp(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
 class ArmModel:
     """SO-101 forward/inverse kinematics in calibrated joint units, plus straight-line path planning."""
 
-    def __init__(self, ranges: dict[str, tuple[int, int]], urdf: Path = URDF):
+    def __init__(self, ranges: dict[str, tuple[int, ...]], urdf: Path = URDF):
+        """ranges: joint -> (range_min, range_max[, drive_mode]) raw servo ticks (see load_ranges)."""
         self.kin = PlacoKinematics(str(urdf), "gripper_frame_link", list(BODY))
-        # degrees per calibrated unit, per joint
-        self.scale = np.array([(ranges[j][1] - ranges[j][0]) / 2 * 360 / MAX_RES / 100 for j in BODY])
+        lo = np.array([ranges[j][0] for j in BODY], float)
+        hi = np.array([ranges[j][1] for j in BODY], float)
+        sign = np.array([-1.0 if len(ranges[j]) > 2 and ranges[j][2] else 1.0 for j in BODY])
+        # deg = units * scale + zero_deg: unit 0 is the range middle, URDF 0 is the center pose (HALF_TURN)
+        # units already carry the drive-mode sign (SO101.to_units), so only the zero offset needs it
+        self.scale = (hi - lo) / 2 * 360 / MAX_RES / 100  # degrees per calibrated unit
+        self.zero_deg = sign * ((lo + hi) / 2 - HALF_TURN) * 360 / MAX_RES  # URDF angle at unit 0
 
         # pan axis position (world xy), for azimuth of a point around the base
         self.kin.forward_kinematics(np.zeros(len(BODY)))
@@ -146,11 +155,11 @@ class ArmModel:
     # ---------- unit conversion ----------
     def to_deg(self, pose: dict[str, float]) -> np.ndarray:
         """Body-joint pose in calibrated units -> URDF joint angles in degrees."""
-        return np.array([pose[j] for j in BODY]) * self.scale
+        return np.array([pose[j] for j in BODY]) * self.scale + self.zero_deg
 
     def to_units(self, deg: np.ndarray) -> dict[str, float]:
         """URDF joint angles in degrees -> body-joint pose in calibrated units."""
-        return {j: float(v) for j, v in zip(BODY, np.asarray(deg)[: len(BODY)] / self.scale)}
+        return {j: float(v) for j, v in zip(BODY, (np.asarray(deg)[: len(BODY)] - self.zero_deg) / self.scale)}
 
     # ---------- kinematics ----------
     def fk(self, pose: dict[str, float]) -> np.ndarray:

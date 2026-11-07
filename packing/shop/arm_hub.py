@@ -24,12 +24,11 @@ log = logging.getLogger(__name__)
 
 
 # Generic poses for the dashboard's preview toggle (calibrated units; checked with FK to look sensible).
-PREVIEW_POSES: dict[str, tuple[str, dict[str, float]]] = {
-    "home": ("Home (calibration mid pose)", dict(shoulder_pan=0, shoulder_lift=0, elbow_flex=0, wrist_flex=0,
-                                                 wrist_roll=0, gripper=30)),
-    "over_tray": ("Over the tray, pointing down", dict(shoulder_pan=0, shoulder_lift=-15, elbow_flex=0,
-                                                       wrist_flex=85, wrist_roll=0, gripper=40)),
-    "tucked": ("Tucked in", dict(shoulder_pan=0, shoulder_lift=-90, elbow_flex=40, wrist_flex=90,
+PREVIEW_POSES: dict[str, tuple[str, dict[str, float] | None]] = {
+    "home": ("Calibration center pose", None),  # None = computed: the URDF zero pose, in units
+    "over_tray": ("Over the tray, pointing down", dict(shoulder_pan=0, shoulder_lift=-10, elbow_flex=10,
+                                                       wrist_flex=90, wrist_roll=0, gripper=40)),
+    "tucked": ("Tucked in", dict(shoulder_pan=0, shoulder_lift=-90, elbow_flex=55, wrist_flex=90,
                                  wrist_roll=0, gripper=0)),
 }
 
@@ -161,9 +160,13 @@ class ArmHub:
 
     def preview(self, name: str) -> dict:
         """ArmState for a named generic pose — no arm needed (FK only). KeyError for unknown names."""
-        joints = dict(PREVIEW_POSES[name][1])
+        preset = PREVIEW_POSES[name][1]
         if self.model is None:
             raise ArmBusy("kinematics unavailable (placo not installed?)")
+        if preset is None:  # the calibration center pose = URDF zero, expressed in calibrated units
+            joints = {**self.model.to_units(np.zeros(5)), "gripper": 30.0}
+        else:
+            joints = dict(preset)
         with self._lock:
             fr = self.model.link_frames(joints)
         return {"connected": False, "source": "preview", "torque": None, "mode": "idle", "stale_s": None,

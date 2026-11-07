@@ -41,3 +41,24 @@ class KinematicsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AngleConventionTests(unittest.TestCase):
+    """URDF zero = the calibration center pose (raw HALF_TURN), not the middle of the recorded range."""
+
+    def test_center_pose_is_urdf_zero(self):
+        import numpy as np
+
+        from packing.motion.kinematics import HALF_TURN, MAX_RES, ArmModel
+        from packing.joints import BODY
+
+        ranges = {j: (900, 3000, 0) for j in BODY}  # asymmetric: middle 1950 != HALF_TURN
+        ranges["elbow_flex"] = (900, 3000, 1)  # reversed joint
+        m = ArmModel(ranges)
+        center_units = m.to_units(np.zeros(len(BODY)))
+        for j in BODY:  # unit value of raw HALF_TURN: (raw - min) / (max - min) * 200 - 100, sign by drive mode
+            u = (HALF_TURN - 900) / 2100 * 200 - 100
+            self.assertAlmostEqual(center_units[j], -u if j == "elbow_flex" else u, places=6)
+        np.testing.assert_allclose(m.to_deg(m.to_units(np.array([10, -20, 30, 5, 0]))), [10, -20, 30, 5, 0], atol=1e-9)
+        # one raw tick = 360 / MAX_RES degrees
+        self.assertAlmostEqual(abs(m.scale[0]) * 200 / 2100, 360 / MAX_RES, places=9)

@@ -21,6 +21,34 @@ interface Props {
 const fmt = (v: number | null | undefined, digits = 1, unit = "") => (v == null ? "—" : `${v.toFixed(digits)}${unit}`);
 const yesNo = (v: boolean | null | undefined, yes: string, no: string) => (v == null ? "—" : v ? yes : no);
 
+/** Corner ids read as plain labels ("Bottom-left corner"); pockets keep their id ("Bottom-left (aa_1)"). */
+const isCornerId = (id: string) => id.startsWith("corner_");
+const captureName = (r: { pocket: string; label: string }) => (isCornerId(r.pocket) ? r.label : `${r.label} (${r.pocket})`);
+
+type CalMode = CalSession["mode"];
+
+/** Segmented control for the reference-point set. `mode` undefined = an older server without corner support. */
+export function ModeSwitch({ mode, busy, onPick }: { mode: CalMode | undefined; busy: string | null; onPick: (m: CalMode) => void }) {
+  const supported = mode !== undefined;
+  return (
+    <div className="mode-row">
+      <span className="mode-label" id="mode-l">Reference points</span>
+      <div className="seg" role="radiogroup" aria-labelledby="mode-l">
+        {(["corners", "pockets"] as const).map((m) => (
+          <button key={m} type="button" role="radio" aria-checked={mode === m}
+                  className={mode === m ? "on" : ""} disabled={!supported || busy !== null}
+                  onClick={() => { if (mode !== m) onPick(m); }}>
+            {busy === `mode:${m}` ? "Switching…" : m === "corners" ? "Plate corners" : "Pocket centers"}
+          </button>
+        ))}
+      </div>
+      {!supported && (
+        <p className="mode-note">This server doesn't support corner mode yet — restart it to update.</p>
+      )}
+    </div>
+  );
+}
+
 function ArmStatus({ arm, stale, run, busy }: Pick<Props, "arm" | "stale" | "run" | "busy">) {
   const a = arm.data;
   return (
@@ -117,19 +145,15 @@ export default function Panel(p: Props) {
                 <p className="sub">
                   Touch each reference point with the gripper tip while the motors are off. The arm goes limp: hold it first.
                 </p>
-                <button className="big" disabled={busy !== null} onClick={() => setConfirm("start")}>Start calibration</button>
+                <div className="cal-actions single">
+                  <button className="big" disabled={busy !== null} onClick={() => setConfirm("start")}>Start calibration</button>
+                </div>
               </>
             ) : (
               <>
-                <div className="mode-switch" role="group" aria-label="Reference points">
-                  {(["corners", "pockets"] as const).map((m) => (
-                    <button key={m} type="button" className={s.mode === m ? "on" : ""} aria-pressed={s.mode === m}
-                            disabled={busy !== null} onClick={() => run(`mode:${m}`, "POST", "/api/calibration/mode", { mode: m })}>
-                      {m === "corners" ? "Plate corners" : "Pocket centers"}
-                    </button>
-                  ))}
-                </div>
-                <p className="sub">
+                <ModeSwitch mode={(s as Partial<CalSession>).mode} busy={busy}
+                            onPick={(m) => { p.setTarget(null); run(`mode:${m}`, "POST", "/api/calibration/mode", { mode: m }); }} />
+                <p className="sub instr">
                   {s.mode === "corners"
                     ? "Hold the tip (red dot) to the middle of each rounded plate corner, on the top edge, then press its button."
                     : "Guide the tip (red dot) onto the center of each pocket, at the tray face, then press its button."}
@@ -142,15 +166,16 @@ export default function Panel(p: Props) {
                         <button className="big capture" disabled={busy !== null}
                                 onMouseEnter={() => p.setTarget(r.pocket)} onFocus={() => p.setTarget(r.pocket)}
                                 onClick={() => capture(r.pocket)}>
-                          {busy === `capture:${r.pocket}` ? "Capturing…" : `${r.captured ? "Recapture" : "Capture"} ${r.label} (${r.pocket})`}
+                          {busy === `capture:${r.pocket}` ? "Capturing…" : `${r.captured ? "Recapture" : "Capture"} ${captureName(r)}`}
                         </button>
-                        <span className="cap-state">
-                          {r.captured ? <><span className="check" aria-label="captured">✓</span> {fmt(pt?.residual_mm, 1, " mm")}</> : <span className="sub">not yet</span>}
+                        <span className={`cap-state${r.captured ? " done" : ""}`}>
+                          {r.captured ? <><span className="check" aria-label="captured">✓</span> {fmt(pt?.residual_mm, 1, " mm")}</> : "not yet"}
                         </span>
-                        {pt && (
-                          <button className="del" disabled={busy !== null} aria-label={`Delete point ${r.pocket}`}
+                        {pt ? (
+                          <button className="del cap-del" disabled={busy !== null} aria-label={`Delete point ${r.pocket}`}
+                                  title="Delete this point"
                                   onClick={() => run(`del:${r.pocket}`, "DELETE", `/api/calibration/points/${encodeURIComponent(r.pocket)}`)}>×</button>
-                        )}
+                        ) : <span aria-hidden="true" />}
                       </div>
                     );
                   })}
@@ -198,7 +223,7 @@ export default function Panel(p: Props) {
             <FitBox session={s} names={names} />
 
             {s.active && (
-              <div className="row-btns">
+              <div className="cal-actions">
                 <button className="big" disabled={busy !== null || !s.fit?.ok}
                         title={s.fit?.ok ? "Save this fit as the tray calibration" : "Needs a good fit first"}
                         onClick={() => run("save", "POST", "/api/calibration/save")}>

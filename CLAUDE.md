@@ -35,6 +35,11 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   small (~0.6 mm). P=32 halves sag but the user found it too stiff, so `servo_p` default is 24 (middle);
   accel=20 kept (RAM only, re-applied each connect via `RealArm.tune`) + software sag compensation (`motion.sag_gain`, outer integral loop in `Motion._tick`).
 - Verified directions (Nov 2026): gripper 0 = closed, 100 = open; `wrist_flex` + = wrist tips up.
+- **Joint angles for kinematics** (`ArmModel`, fixed 2026-11-07): URDF 0° = the pose held during `calibrate center`
+  (raw `HALF_TURN` = 2047), deg = (raw − 2047)·360/4095. NOT the middle of the recorded range (unit 0): the SO-101's
+  limits are asymmetric (lift 5°, elbow 8.7°, wrist 4° apart here), which put the tip ~2–4 cm low. With the fix, the
+  jaw resting on the table reads z ≈ +5 mm. Remaining error = how well the (eyeballed) center pose was held; a
+  table-touch joint-offset calibration is the planned fix if needed. Units / taught poses are unaffected.
 
 ## Moving the arm — rules
 - Physical motion is outward-facing: get the user's explicit OK ("go") before every run that moves
