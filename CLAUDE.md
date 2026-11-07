@@ -100,3 +100,6 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
 - Joint moves = curved tip path; `{line: X}` / `goto --line` = straight tip path via IK, fully planned
   and validated (reach, joint limits, jumps) before moving.
 - Keep new features testable with `FakeArm` + `--sim`; add tests in `packing/tests/`.
+- **Prefer a well-fitting library over custom code** for anything complex (math, geometry, file formats,
+  UI). Write it ourselves only if no good library fits, or the library has a real downside (huge, unmaintained,
+  wrong license, poor fit). Add new deps to `requirements.txt`. E.g. DXF via `ezdxf`, rigid fits via `scipy`.

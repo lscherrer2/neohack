@@ -1,10 +1,14 @@
 """python -m packing.shop start [--robot]  # everything in one: server + dashboard + robot agent
-   python -m packing.shop serve            # order server: MCP tools at /mcp + robot job API
+   python -m packing.shop serve [--robot]  # order server: MCP tools at /mcp + robot job API (+ arm with --robot)
    python -m packing.shop robot [--robot]  # robot agent (simulated packing unless --robot)
    python -m packing.shop chat             # Claude Haiku ordering agent using the MCP tools
 
 All data is real: orders in packing/data/shop_orders.db, stock from packing/data/inventory.db
 (the packing cell's inventory; restock it from the dashboard after refilling the shelves).
+
+The arm (live 3D view, calibration tab, packing) is owned by the server's ArmHub: the real arm with
+--robot, a simulated one otherwise (sim runs save tray calibration to data/sim_tray_cal.json).
+`serve` without --robot owns no arm; a separate `robot --robot` process then reports telemetry.
 """
 
 from __future__ import annotations
@@ -25,17 +29,39 @@ def load(args):
 
     cfg = load_config(args.config)
     shelf = Shelf(cfg)
-    products = cfg.catalog or {sku: f"product {sku}" for sku in dict.fromkeys(cfg.part_slots.values())}
+    products = cfg.catalog or {sku: f"product {sku}" for sku in dict.fromkeys(cfg.stock_slots.values())}
     catalog = Catalog(products, max_items=len(cfg.box_slots), available=shelf.available)
     store = OrderStore(getattr(args, "db", None) or cfg.inventory_db.with_name("shop_orders.db"))
     return catalog, store, shelf
 
 
-def make_packer(args, shelf):
+def make_hub(args, cfg, own_arm: bool):
+    """ArmHub for the server. own_arm=False: the arm lives in another process (telemetry only)."""
+    from ..hardware.arm import FakeArm, RealArm
+    from ..motion.kinematics import ArmModel, load_ranges
+    from .arm_hub import ArmHub
+
+    def model():
+        return ArmModel(load_ranges(cfg.robot_id))
+
+    if not own_arm:
+        return ArmHub(None, "remote", model)
+    if args.robot:
+        return ArmHub(lambda: RealArm(cfg.port, cfg.robot_id, cfg.motion.max_step), "real", model)
+    if cfg.tray:  # simulated arm: never overwrite the real tray calibration
+        cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
+    return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)
+
+
+def make_packer(args, shelf, hub=None):
     if args.robot:
         from ..service.worker import RobotPacker
 
-        return RobotPacker(args.config)
+        if hub is not None:  # same process as the server: borrow the hub's arm
+            return RobotPacker(args.config, arm_provider=hub.borrow)
+        from ..hardware.telemetry import http_publisher
+
+        return RobotPacker(args.config, telemetry=http_publisher(args.server))
     from .shelf import ShelfSimPacker
 
     return ShelfSimPacker(shelf, args.sim_seconds)
@@ -57,6 +83,8 @@ def main() -> None:
     for q in (st, r):
         q.add_argument("--robot", action="store_true", help="pack on the real arm (default: simulated packing)")
         q.add_argument("--sim-seconds", type=float, default=3.0, help="simulated packing time per item")
+    s.add_argument("--robot", action="store_true",
+                   help="this server owns the real arm (3D view + calibration); don't also run `robot --robot`")
     r.add_argument("--server", default="http://localhost:8000")
     r.add_argument("--once", action="store_true", help="pack at most one order, then exit")
     c = sub.add_parser("chat", help="Claude Haiku ordering agent using the server's MCP tools")
@@ -72,15 +100,20 @@ def main() -> None:
         from .server import create_server
 
         catalog, store, shelf = load(args)
+        hub = make_hub(args, shelf.cfg, own_arm=args.cmd == "start" or args.robot)
         if args.cmd == "start":  # robot agent as a background thread talking to this same server
             from .robot_agent import run
 
             url = f"http://127.0.0.1:{args.port}"
-            threading.Thread(target=run, args=(url, make_packer(args, shelf)), name="robot-agent",
+            threading.Thread(target=run, args=(url, make_packer(args, shelf, hub)), name="robot-agent",
                              daemon=True).start()
-        print(f"Dashboard: http://{args.host}:{args.port}/dashboard")
-        uvicorn.run(create_server(store, catalog, auto_dispatch=args.auto, shelf=shelf),
-                    host=args.host, port=args.port, timeout_graceful_shutdown=2)
+        print(f"Dashboard: http://{args.host}:{args.port}/dashboard/")
+        try:
+            uvicorn.run(create_server(store, catalog, auto_dispatch=args.auto, shelf=shelf, hub=hub),
+                        host=args.host, port=args.port, timeout_graceful_shutdown=2)
+        finally:
+            if hub.connected and hub.mode == "idle":
+                hub.close()  # torque stays on (holding)
     elif args.cmd == "robot":
         from .robot_agent import run
 

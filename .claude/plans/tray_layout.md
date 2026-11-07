@@ -1,6 +1,15 @@
 # Plan: DXF parts tray → slots, calibration, picking, dashboard
 
-Status: **design, not started** (2026-11-07). Tray scope decided; box + drop spot are TODO.
+Status (2026-11-07): **tray core built** on branch `tray-core` — DXF layout, config, calibration math +
+hand-guided `tray-calibrate`, pocket inventory, tray API (`/api/tray*`), tests in `packing/tests/test_tray.py`.
+**Not yet:** picking from pockets (`Cell.pick_tray`, per-type grip width), dashboard UI (React port, see
+`arm_viz.md`), box + drop spot. Not yet tried on the real arm.
+
+As built (differs from the design below): DXF read with **ezdxf** (loops via `ezdxf.edgeminer`, polylines
+exploded), rigid fit with **scipy** `Rotation.align_vectors`; fit rejected above **3 mm RMS**
+(one point 10 mm off of 4 gives ~3.3 mm); config keys `size`/`spacing`/`grip_axis` per type, no
+`grip_width` yet; `reference_points` in config; sim uses `sim_tray_cal.json`. Code: `packing/tray/`
+(`dxf.py`, `layout.py`, `calibration.py`), `packing/tools/tray_calibrate.py`, CLI `tray` / `tray-calibrate`.
 
 ## Goal
 Replace the 4 placeholder `part_slots` with a tilted, clamped parts tray whose pocket layout comes

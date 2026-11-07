@@ -157,6 +157,20 @@ class ArmModel:
         """4x4 gripper-frame transform for a body-joint pose."""
         return np.array(self.kin.forward_kinematics(self.to_deg(pose)))
 
+    # Links drawn by the dashboard's 3D view, base -> tip.
+    LINKS = ["base_link", "shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link", "gripper_link",
+             "gripper_frame_link", "moving_jaw_so101_v1_link"]
+    GRIPPER_RAD = (-0.174533, 1.74533)  # URDF gripper joint limits; units 0..100 mapped linearly (approximate)
+
+    def link_frames(self, pose: dict[str, float]) -> dict[str, np.ndarray]:
+        """4x4 world transform of every drawn link for `pose` (body joints + optional gripper, units)."""
+        self.kin._set(self.to_deg(pose))
+        if "gripper" in pose:
+            lo, hi = self.GRIPPER_RAD
+            self.kin.robot.set_joint("gripper", lo + (hi - lo) * max(0.0, min(100.0, pose["gripper"])) / 100)
+        self.kin.robot.update_kinematics()
+        return {name: np.array(self.kin.robot.get_T_world_frame(name)) for name in self.LINKS}
+
     def tip(self, pose: dict[str, float]) -> np.ndarray:
         """Gripper tip position in meters (base frame: x forward, y left, z up)."""
         return self.fk(pose)[:3, 3]

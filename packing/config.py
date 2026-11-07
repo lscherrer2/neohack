@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from .tray.layout import TrayLayout, TrayType
+
 
 @dataclass
 class GripperCfg:
@@ -40,6 +42,35 @@ class BoxSlot:
 
 
 @dataclass
+class TrayCfg:
+    """Parts tray: pockets come from a DXF; its pose comes from `python -m packing tray-calibrate`."""
+
+    dxf: Path
+    calibration_file: Path
+    types: list[TrayType]
+    reference_points: list[str]  # pockets touched during calibration (>= 3, spread out)
+    protrusion_mm: float = 10.0  # how far every item sticks out of the tray face
+    extract_mm: float = 120.0  # pull straight out along the tray normal at least this far
+    approach_mm: float = 30.0  # stand-off above the item top before the final straight approach
+    _layout: TrayLayout | None = field(default=None, repr=False, compare=False)
+
+    def layout(self) -> TrayLayout:
+        """Pockets parsed from the DXF (cached)."""
+        if self._layout is None:
+            from .tray.dxf import read_features
+            from .tray.layout import build_layout
+
+            self._layout = build_layout(read_features(self.dxf), self.types)
+        return self._layout
+
+    def calibration(self):
+        """Current saved calibration (re-read every call: tray-calibrate may have updated it), or None."""
+        from .tray.calibration import TrayCalibration
+
+        return TrayCalibration.load(self.calibration_file)
+
+
+@dataclass
 class CellConfig:
     port: str
     robot_id: str
@@ -54,6 +85,12 @@ class CellConfig:
     catalog: dict[str, str] = field(default_factory=dict)  # sku -> spoken product name (voice ordering)
     gripper: GripperCfg = field(default_factory=GripperCfg)
     motion: MotionCfg = field(default_factory=MotionCfg)
+    tray: TrayCfg | None = None
+
+    @property
+    def stock_slots(self) -> dict[str, str]:
+        """Every place a part can sit, location -> sku: taught part slots plus tray pockets."""
+        return {**self.part_slots, **(self.tray.layout().slots() if self.tray else {})}
 
     @property
     def locations(self) -> list[str]:
@@ -77,7 +114,7 @@ def load_config(path: str | Path) -> CellConfig:
         return q if q.is_absolute() else base / q
 
     r, loc = raw["robot"], raw["locations"]
-    return CellConfig(
+    cfg = CellConfig(
         port=r["port"],
         robot_id=r.get("id", "my_awesome_follower_arm"),
         poses_file=rel(raw.get("poses_file", "data/poses.json")),
@@ -92,4 +129,26 @@ def load_config(path: str | Path) -> CellConfig:
         catalog={str(k): str(v) for k, v in (raw.get("catalog") or {}).items()},
         gripper=GripperCfg(**(raw.get("gripper") or {})),
         motion=MotionCfg(**(raw.get("motion") or {})),
+        tray=_load_tray(raw.get("tray"), rel),
+    )
+    if cfg.tray:  # tray item names fill in the catalog
+        for t in cfg.tray.types:
+            cfg.catalog.setdefault(t.sku, t.name)
+    return cfg
+
+
+def _load_tray(raw: dict | None, rel) -> TrayCfg | None:
+    if not raw:
+        return None
+    types = [TrayType(sku=str(sku), **spec) for sku, spec in (raw.get("types") or {}).items()]
+    if not types:
+        raise ValueError("tray: needs at least one entry under types")
+    return TrayCfg(
+        dxf=rel(raw["dxf"]),
+        calibration_file=rel(raw.get("calibration_file", "data/tray_cal.json")),
+        types=types,
+        reference_points=list(raw.get("reference_points") or []),
+        protrusion_mm=float(raw.get("protrusion_mm", 10.0)),
+        extract_mm=float(raw.get("extract_mm", 120.0)),
+        approach_mm=float(raw.get("approach_mm", 30.0)),
     )
