@@ -1,59 +1,64 @@
 # CLAUDE.md
 
-Fork of Hugging Face LeRobot (Hiwonder's SO-ARM101 distribution, with local tweaks in `src/lerobot`)
-driving a **single SO-101 follower arm with no leader arm**. On top of it sits `packing/`: a
-teach-and-repeat cell that moves boxes, packs parts from fixed slots, and tracks inventory.
+Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight over the Feetech servo SDK —
+**no LeRobot** (removed Nov 2026; our driver keeps LeRobot's units and calibration format). The project is
+`packing/`: a teach-and-repeat cell that moves boxes, packs parts from fixed slots, and tracks inventory.
 
 ## Environment
-- `conda activate lerobot` (Python 3.10, `/opt/miniconda3/envs/lerobot`). Installed: `.[feetech]`, `placo` (IK),
-  `mcp` 2.x (`MCPServer`, `from mcp import Client`), `fastapi`/`uvicorn`, `anthropic` 2.x.
+- `.venv/` (Python 3.13): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. Deps: `feetech-servo-sdk`
+  (`scservo_sdk`), `pyserial`, `numpy`, `pyyaml`, `placo` (IK), `mcp` 2.x (`MCPServer`, `from mcp import Client`),
+  `opencv-python`, `fastapi`/`uvicorn`, `anthropic` 2.x. Run things as `.venv/bin/python -m packing ...`.
 - Arm port: `/dev/cu.usbmodem5CE51213501` (macOS). Check with `ls /dev/cu.*`.
 - Only one process can own the port. `lsof /dev/cu.usbmodem5CE51213501` before running anything, and
   never kill a user's session (e.g. `keys`) — ask them to quit it.
-- Tests (sim only, no hardware): `python -m unittest discover -s packing/tests -t .` from repo root.
+- Tests (sim only, no hardware): `.venv/bin/python -m unittest discover -s packing/tests -t .` from repo root.
   No pytest in the env.
 
 ## Hardware facts
-- Assembled Hiwonder kit: servo IDs 1–6 already set (`shoulder_pan`…`gripper`). Never run
-  `lerobot-setup-motors` — that's for DIY kits only.
-- Calibrated as robot id `my_awesome_follower_arm`; file at
-  `~/.cache/huggingface/lerobot/calibration/robots/so101_follower/my_awesome_follower_arm.json`.
+- Assembled Hiwonder kit: STS3215 servos, IDs 1–6 already set (`shoulder_pan`…`gripper`), 1 Mbps. Never change
+  servo IDs/baud.
+- Calibrated as robot id `my_awesome_follower_arm`: values live in the servo EEPROM **and**
+  `packing/calibration/my_awesome_follower_arm.json` (LeRobot JSON format; `RealArm` refuses to connect if they
+  differ). Tool: `python -m packing.tools.calibrate scan|backup|center|range|restore` (torque off throughout).
   Don't recalibrate casually: it changes what every taught pose / dataset value means.
-  `wrist_roll` was re-centered by hand (homing offset -73) because its mid pose was off.
+  **Recalibrated 2026-11-07** (old values in `packing/calibration/*.backup_20261107_114046.json`): poses taught
+  before that are ~7° off on lift/elbow — re-teach.
 - Units: body joints -100..100 (0 = calibration mid pose = `home`), gripper 0..100.
   Shoulder/elbow sag ~5 units under gravity when holding a pose.
-- Tracking (measured with `python -m packing tune`, Nov 2026): LeRobot sets servo P=16, accel=254.
+- Tracking (measured with `python -m packing tune`, Nov 2026): connect sets servo P=16, accel=254 (LeRobot's values).
   Main error is **gravity sag on shoulder_lift** (~8 units at rest = ~5 cm at the tip); jitter is
   small (~0.6 mm). P=32 halves sag but the user found it too stiff, so `servo_p` default is 24 (middle);
-  accel=20 kept (RAM only, re-applied each connect) + software sag compensation (`motion.sag_gain`, outer integral loop in `Motion._tick`).
-- Which gripper value is open vs closed is **not yet verified** (`gripper.open/closed` in `packing/cell.yaml`).
+  accel=20 kept (RAM only, re-applied each connect via `RealArm.tune`) + software sag compensation (`motion.sag_gain`, outer integral loop in `Motion._tick`).
+- Verified directions (Nov 2026): gripper 0 = closed, 100 = open; `wrist_flex` + = wrist tips up.
 
 ## Moving the arm — rules
 - Physical motion is outward-facing: get the user's explicit OK ("go") before every run that moves
   the arm; say what will move and how far. Read-only connects/reads are fine.
 - Torque off = arm drops. Warn the user to hold it first. Use `--keep-torque` / `close(release=False)`
   when you can't prompt.
-- `max_relative_target` must be a **float** (`ensure_safe_goal_position` raises `TypeError` on int).
+- Connecting (`SO101`) never drops torque: settings go to RAM with EEPROM locked, then torque on at goal = present.
+- Holding a pose heats the servos (gripper hit 60 °C after ~30 min; limit ~70). Release when idle.
 - Right after writing `Homing_Offset`, `Present_Position` reads can be stale for a moment.
 
 ## Layout
-- `examples/so101_no_leader.py` — quick standalone `demo` / `keys` / `home` control.
 - `packing/` — the cell (see `packing/README.md`, design in `.claude/plans/packing_cell.md`):
   - `joints.py` joint names/limits · `config.py` cell.yaml → dataclasses · `poses.py` taught-pose store · `cli.py`
-  - `hardware/` `arm.py` Arm protocol, RealArm/FakeArm · `keyboard.py` jog key map + raw-terminal input
+  - `hardware/` `so101.py` Feetech driver (`FeetechBus` registers/sync r/w, `SO101` units + calibration) ·
+    `arm.py` Arm protocol, RealArm/FakeArm · `keyboard.py` jog key map + raw-terminal input
   - `motion/` `controller.py` `Motion`: smooth joint moves, `follow()` for paths, settle + following-error
-    checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK, straight-line paths
+    checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line paths
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
-  - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test
+  - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
   - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
     `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
     `vapi.py` (Catalog, parse_items) and `worker.py` (RobotPacker).
   - `shop/` **current** order stack (see "Shop" below and `packing/shop/README.md`)
   - Config `packing/cell.yaml`; data in `packing/data/` (`poses.json`, `inventory.db`; `--sim` uses `sim_*`).
-  - `packing/urdf/` — SO-101 URDF + meshes from TheRobotStudio/SO-ARM100 (`so101_new_calib.urdf`).
+  - `packing/urdf/so101_new_calib.urdf` — from TheRobotStudio/SO-ARM100, meshes stripped (kinematics only).
+  - `packing/calibration/` — per-arm calibration JSON (committed).
 - `packing/remote/` — LLM contingency control over MCP (`python -m packing.remote [--sim]`, mcp 2.x:
   `from mcp.server.mcpserver import MCPServer`). `jog.py` direction commands → checked straight lines;
-  `safety.py` RemoteLimits safe box; `cameras.py` OpenCV or sim schematic; `server.py` tools + LLM instructions.
+  `safety.py` RemoteLimits safe box; `cameras.py` cv2.VideoCapture or sim schematic; `server.py` tools + LLM instructions.
 - CLI: `python -m packing <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|status|events|set-part|set-box|clear-output|pack|move-box> [--sim]`
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`

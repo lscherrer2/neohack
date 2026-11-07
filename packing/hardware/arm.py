@@ -29,45 +29,33 @@ class Arm(Protocol):
 
 
 class RealArm:
-    """The physical SO-101 follower, via LeRobot's SO101Follower. Connects (torque on) on creation."""
+    """The physical SO-101 follower, via our Feetech driver (`so101.SO101`). Connects (torque on) on creation."""
 
     def __init__(self, port: str, robot_id: str, max_step: float = 15.0):
-        from lerobot.robots.so101_follower import SO101Follower, SO101FollowerConfig
+        from .so101 import SO101
 
-        config = SO101FollowerConfig(port=port, id=robot_id, max_relative_target=float(max_step))
-        self.robot = SO101Follower(config)
-        if not self.robot.calibration:
-            raise RuntimeError(f"No calibration file for '{robot_id}'. Calibrate the arm first.")
-        self.robot.connect(calibrate=False)  # enables torque, holds current pose
+        self.robot = SO101(port, robot_id, max_relative_target=float(max_step))  # configures, holds current pose
 
     def tune(self, p_gain: int | None = None, accel: int | None = None) -> None:
         """Servo control tuning for the body joints. Torque is on => EEPROM is locked, so these land in
-        RAM only: they last until power-off / next connect (LeRobot's configure() resets P to 16)."""
-        for joint in BODY:
-            if p_gain is not None:
-                self.robot.bus.write("P_Coefficient", joint, int(p_gain))
-            if accel is not None:
-                self.robot.bus.write("Acceleration", joint, int(accel))
+        RAM only: they last until power-off / next connect (connect resets P to 16, accel to 254)."""
+        if p_gain is not None:
+            self.robot.write_register("P_Coefficient", BODY, int(p_gain))
+        if accel is not None:
+            self.robot.write_register("Acceleration", BODY, int(accel))
 
     def read(self) -> dict[str, float]:
-        positions = self.robot.bus.sync_read("Present_Position")
-        return {joint: float(value) for joint, value in positions.items()}
+        return self.robot.read()
 
     def write(self, pose: dict[str, float]) -> None:
-        self.robot.send_action({f"{joint}.pos": float(pose[joint]) for joint in JOINTS})
+        self.robot.write({joint: float(pose[joint]) for joint in JOINTS})
 
     def set_torque(self, on: bool) -> None:
-        if on:
-            self.robot.bus.enable_torque()
-        else:
-            self.robot.bus.disable_torque()
+        self.robot.set_torque(on)
 
     def close(self, release: bool = False) -> None:
         """release=True turns torque off (arm goes limp)."""
-        if release:
-            self.robot.disconnect()
-        else:
-            self.robot.bus.disconnect(disable_torque=False)
+        self.robot.close(release=release)
 
 
 class FakeArm:

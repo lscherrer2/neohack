@@ -34,33 +34,41 @@ def _jpeg(image_bgr: np.ndarray) -> bytes:
 
 
 class RealCameras:
-    """LeRobot OpenCV cameras, opened on first use."""
+    """OpenCV cameras, opened on first use."""
+
+    WARMUP_FRAMES = 5  # first frames after opening are often dark / stale
 
     def __init__(self, specs: list[CameraSpec]):
         self.specs = specs
-        self._cams: dict[str, object] = {}
+        self._cams: dict[str, cv2.VideoCapture] = {}
 
     def _open(self) -> None:
-        from lerobot.cameras.opencv import OpenCVCamera, OpenCVCameraConfig
-
         for spec in self.specs:
-            if spec.name not in self._cams:
-                cam = OpenCVCamera(OpenCVCameraConfig(index_or_path=spec.index_or_path, width=spec.width,
-                                                      height=spec.height, fps=spec.fps))
-                cam.connect()
-                self._cams[spec.name] = cam
+            if spec.name in self._cams:
+                continue
+            cam = cv2.VideoCapture(spec.index_or_path)
+            if not cam.isOpened():
+                raise RuntimeError(f"camera '{spec.name}' ({spec.index_or_path}) did not open")
+            cam.set(cv2.CAP_PROP_FRAME_WIDTH, spec.width)
+            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, spec.height)
+            cam.set(cv2.CAP_PROP_FPS, spec.fps)
+            for _ in range(self.WARMUP_FRAMES):
+                cam.read()
+            self._cams[spec.name] = cam
 
     def snapshot(self, pose: dict[str, float] | None = None) -> dict[str, bytes]:
         self._open()
         out = {}
         for name, cam in self._cams.items():
-            rgb = cam.read()  # LeRobot returns RGB
-            out[name] = _jpeg(cv2.cvtColor(np.asarray(rgb), cv2.COLOR_RGB2BGR))
+            ok, bgr = cam.read()
+            if not ok:
+                raise RuntimeError(f"camera '{name}' returned no frame")
+            out[name] = _jpeg(bgr)
         return out
 
     def close(self) -> None:
         for cam in self._cams.values():
-            cam.disconnect()
+            cam.release()
         self._cams.clear()
 
 

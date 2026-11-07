@@ -1,4 +1,4 @@
-"""python -m packing <command>   (run from the repo root, `conda activate lerobot` first)
+"""python -m packing <command>   (run from the repo root with .venv: `source .venv/bin/activate`)
 
 Setup:     check | teach NAME... | teach-all [--missing] | poses | goto NAME | home | release
 Inventory: restock | status | events | set-part ID STATUS | set-box ID LOCATION [--status S] | clear-output
@@ -319,7 +319,7 @@ def _load_arm_model(cfg: CellConfig) -> ArmModel:
     try:
         return ArmModel(load_ranges(cfg.robot_id))
     except ImportError as e:
-        raise CellError("straight-line moves need placo: pip install -e '.[kinematics]'") from e
+        raise CellError("straight-line moves need placo: pip install -r requirements.txt") from e
 
 
 def _safe_hold(arm: Arm) -> None:

@@ -4,3 +4,5 @@ service/.env
 data/orders.db
 service/vapi_tools.json
 data/demo_logs/
+calibration/.*_pending.json
+calibration/.range_partial.json

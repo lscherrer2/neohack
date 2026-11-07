@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 PORT="${PORT:-8000}"
-PY="${PY:-/opt/miniconda3/envs/lerobot/bin/python}"
+PY="${PY:-.venv/bin/python}"
 LOGDIR="packing/data/demo_logs"
 mkdir -p "$LOGDIR"
 SERVER_LOG="$LOGDIR/server.log"

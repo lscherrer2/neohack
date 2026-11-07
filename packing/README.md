@@ -3,7 +3,7 @@
 Teach-and-repeat: you teach each fixed position once, the arm replays them, and an SQLite
 inventory records every pick/place so a stopped run can resume. Design notes: `.claude/plans/packing_cell.md`.
 
-Run everything from the repo root with `conda activate lerobot`.
+Run everything from the repo root with the venv active: `source .venv/bin/activate` (setup in the top-level README).
 
 ## 1. Describe the table — `packing/cell.yaml`
 List your part slots (with SKU), box supply spots, the pack station, output spots, and the
@@ -55,10 +55,10 @@ robot frame, default 2 cm, max 5), `tilt(up|down, degrees)`, `twist(left|right, 
   `data/remote_log.jsonl`.
 - Arm and cameras are opened on the first tool call, not at server start; `disconnect` releases them
   (motors keep holding).
-- Cameras: list them under `remote.cameras` (find indices with `lerobot-find-cameras opencv`).
+- Cameras: list them under `remote.cameras` (OpenCV camera indices: 0 = first camera).
 ```bash
 python -m packing.remote --sim          # try it: simulated arm, drawn schematic instead of a camera
-claude mcp add so101-arm -e PYTHONPATH=$PWD -- /opt/miniconda3/envs/lerobot/bin/python -m packing.remote
+claude mcp add so101-arm -e PYTHONPATH=$PWD -- $PWD/.venv/bin/python -m packing.remote
 python -m packing.remote --transport streamable-http --port 8765   # HTTP, for other MCP clients
 ```
 

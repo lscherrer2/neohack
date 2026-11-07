@@ -1,7 +1,7 @@
 """Teach pendant: put the arm at a spot and save it as a named pose.
 
 Two ways:
-  jog  (default) motors on, move joints with the keyboard (same keys as examples/so101_no_leader.py)
+  jog  (default) motors on, move joints with the keyboard
   limp (--limp)  motors off, move the arm by hand, press Enter to save (fast, but the arm sags a few
                  units under its own weight when replayed — re-check with `goto`)
 """

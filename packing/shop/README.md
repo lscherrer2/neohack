@@ -1,6 +1,6 @@
 # Shop (slim stack): MCP order server + robot agent + chat agent
 
-Design: `.claude/plans/shop_slim.md`. Two terminals (`conda activate lerobot`, repo root):
+Design: `.claude/plans/shop_slim.md`. Two terminals (`source .venv/bin/activate`, repo root):
 
 ```bash
 python -m packing.shop start            # 1. server + dashboard + robot agent (add --robot for the real arm)

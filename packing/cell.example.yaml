@@ -48,8 +48,8 @@ motion:
   max_step: 25             # library per-command safety cap; must exceed sag_max
   sag_gain: 0.08           # gravity-sag compensation (0 = off)
   sag_max: 15              # max correction, units
-  servo_p: 24              # servo stiffness: 16 = LeRobot default (soft), 32 = factory (stiff); 24 = middle
-  servo_accel: 20          # servo acceleration (LeRobot default 254 = max) — measured best
+  servo_p: 24              # servo stiffness: 16 = connect default (soft), 32 = factory (stiff); 24 = middle
+  servo_accel: 20          # servo acceleration (connect default 254 = max) — measured best
 
 remote:                    # LLM contingency control: python -m packing.remote (see packing/README.md)
   default_step_cm: 2
@@ -63,4 +63,4 @@ remote:                    # LLM contingency control: python -m packing.remote (
   joint_limit: 90
   log_file: data/remote_log.jsonl
   cameras: []              # e.g. [{name: front, index_or_path: 0}, {name: wrist, index_or_path: 1}]
-                           # find indices with: lerobot-find-cameras opencv
+                           # camera index for cv2.VideoCapture (0 = first camera)

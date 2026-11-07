@@ -1,4 +1,4 @@
-"""Cartesian (straight-line) motion for the SO-101 using LeRobot's placo-based IK + the SO-101 URDF.
+"""Cartesian (straight-line) motion for the SO-101 using placo IK + the SO-101 URDF.
 
 Joint-space move (Motion.move_to): every joint interpolates A->B; the gripper tip follows a CURVE.
 Linear move (this module):        the tip position interpolates A->B in a STRAIGHT LINE (orientation
@@ -27,12 +27,42 @@ class PathError(RuntimeError):
 
 def load_ranges(robot_id: str) -> dict[str, tuple[int, int]]:
     """Calibrated (range_min, range_max) servo ticks of each body joint, from the robot's calibration file."""
-    from lerobot.robots.so101_follower import SO101Follower, SO101FollowerConfig
+    from ..hardware.so101 import load_calibration
 
-    cal = SO101Follower(SO101FollowerConfig(port="unused", id=robot_id)).calibration
-    if not cal:
-        raise RuntimeError(f"no calibration for '{robot_id}'")
+    cal = load_calibration(robot_id)
     return {j: (cal[j].range_min, cal[j].range_max) for j in BODY}
+
+
+class PlacoKinematics:
+    """FK/IK on a URDF with placo, joint angles in degrees. `robot` is the placo RobotWrapper."""
+
+    def __init__(self, urdf: str, tip_frame: str, joints: list[str]):
+        import placo
+
+        self.robot = placo.RobotWrapper(urdf)
+        self.solver = placo.KinematicsSolver(self.robot)
+        self.solver.mask_fbase(True)  # base is bolted down
+        self.tip_frame, self.joints = tip_frame, list(joints)
+        self.task = self.solver.add_frame_task(tip_frame, np.eye(4))
+
+    def _set(self, q_deg: np.ndarray) -> None:
+        for name, v in zip(self.joints, np.deg2rad(np.asarray(q_deg)[: len(self.joints)])):
+            self.robot.set_joint(name, v)
+
+    def forward_kinematics(self, q_deg: np.ndarray) -> np.ndarray:
+        self._set(q_deg)
+        self.robot.update_kinematics()
+        return np.array(self.robot.get_T_world_frame(self.tip_frame))
+
+    def inverse_kinematics(self, q_deg: np.ndarray, T: np.ndarray, position_weight: float = 1.0,
+                           orientation_weight: float = 0.01) -> np.ndarray:
+        """One soft IK step from seed `q_deg` toward target pose `T`; returns joint angles in degrees."""
+        self._set(q_deg)
+        self.task.T_world_frame = T
+        self.task.configure(self.tip_frame, "soft", position_weight, orientation_weight)
+        self.solver.solve(True)
+        self.robot.update_kinematics()
+        return np.rad2deg([self.robot.get_joint(name) for name in self.joints])
 
 
 # ---------- rotation helpers (no scipy) ----------
@@ -75,9 +105,7 @@ class ArmModel:
     """SO-101 forward/inverse kinematics in calibrated joint units, plus straight-line path planning."""
 
     def __init__(self, ranges: dict[str, tuple[int, int]], urdf: Path = URDF):
-        from lerobot.model.kinematics import RobotKinematics
-
-        self.kin = RobotKinematics(str(urdf), "gripper_frame_link", list(BODY))
+        self.kin = PlacoKinematics(str(urdf), "gripper_frame_link", list(BODY))
         # degrees per calibrated unit, per joint
         self.scale = np.array([(ranges[j][1] - ranges[j][0]) / 2 * 360 / MAX_RES / 100 for j in BODY])
 

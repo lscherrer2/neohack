@@ -29,8 +29,8 @@ class MotionCfg:
     fps: int = 50
     sag_gain: float = 0.08  # sag compensation: fraction of the error learned per tick (0 = off)
     sag_max: float = 15.0  # max correction, units
-    servo_p: int | None = None  # servo P gain for body joints (LeRobot default 16, factory 32)
-    servo_accel: int | None = None  # servo acceleration register (LeRobot default 254 = max)
+    servo_p: int | None = None  # servo P gain for body joints (connect default 16, factory 32)
+    servo_accel: int | None = None  # servo acceleration register (connect default 254 = max)
 
 
 @dataclass

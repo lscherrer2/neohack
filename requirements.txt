@@ -1,0 +1,17 @@
+# SO-101 packing cell - no LeRobot. Install: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# arm
+feetech-servo-sdk   # scservo_sdk: Feetech STS3215 serial protocol
+pyserial
+numpy
+pyyaml
+# straight-line moves (IK on the URDF)
+placo
+# remote LLM control + cameras
+mcp>=2
+opencv-python
+# order service / shop
+fastapi
+uvicorn
+pydantic
+httpx
+anthropic>=2
