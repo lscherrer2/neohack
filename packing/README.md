@@ -23,7 +23,8 @@ First, check which gripper value is open/closed (y/h) and set `gripper.open/clos
 
 ## 3. Stock and run
 ```bash
-python -m packing restock      # after physically filling slots / supply spots
+python -m packing restock      # after physically filling slots / tray pockets / supply spots (marks them all full)
+python -m packing tray         # tray pockets (full/empty), calibration status; calibrate: python -m packing tray-calibrate
 python -m packing pack --count 2
 python -m packing status       # what's packed / available / where boxes are
 python -m packing clear-output # after taking finished boxes away
