@@ -42,13 +42,17 @@ function ArmStatus({ arm, stale, run, busy }: Pick<Props, "arm" | "stale" | "run
             <dt>Tip</dt><dd>{a?.tip ? a.tip.map((v) => (v * 1000).toFixed(0)).join(", ") + " mm" : "—"}</dd>
           </dl>
           {a?.error && <p className="inline-err">{a.error}</p>}
+          {a?.connected && a.source === "sim" && (
+            <p className="sim-note">Simulated arm — this server was started without <code>--robot</code>, so it never
+              talks to the real arm. Run <code>python -m packing.shop start --robot</code> to use it.</p>
+          )}
           {a?.joints && (
-            <details className="joints">
-              <summary className="sub">Joint values</summary>
+            <div className="joints">
+              <p className="sub">Joint values (units; body −100..100, gripper 0..100)</p>
               <dl className="kv">
                 {Object.entries(a.joints).map(([k, v]) => (<span key={k} className="kv-row"><dt>{k}</dt><dd>{v.toFixed(1)}</dd></span>))}
               </dl>
-            </details>
+            </div>
           )}
           <div className="row-btns">
             {!a?.connected ? (

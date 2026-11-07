@@ -207,3 +207,7 @@ dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
 .loading-tab { min-height: 40vh; }
 .scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .scene-labels .scene-label { position: absolute; left: 0; top: 0; will-change: transform; }
+
+.sim-note { margin: 8px 0; padding: 8px 10px; background: #FFF4CC; border: 1px solid var(--safety); border-radius: 4px;
+            font-size: .85rem; }
+.sim-note code { font-size: .8rem; }
