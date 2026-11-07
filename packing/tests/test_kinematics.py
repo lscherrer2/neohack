@@ -27,6 +27,15 @@ class KinematicsTests(unittest.TestCase):
         for j in A:
             self.assertAlmostEqual(back[j], A[j], places=6)
 
+    def test_urdf_zero_is_the_calibration_pose(self):
+        """URDF 0 deg = raw 2047 (where calibration left each joint), NOT the middle of the range.
+        Using the range middle put the gripper ~15 deg off level (elbow alone: 8.7 deg)."""
+        ranges = load_ranges("my_awesome_follower_arm")
+        pose = {}
+        for j, (lo, hi) in ranges.items():  # units at which raw == 2047
+            pose[j] = (2047 - lo) / (hi - lo) * 200 - 100
+        np.testing.assert_allclose(MODEL.to_deg(pose), 0.0, atol=1e-9)
+
     def test_line_is_straight_and_joint_move_is_not(self):
         p0, p1 = MODEL.tip(B), MODEL.tip(A)
         line = MODEL.line(B, A)

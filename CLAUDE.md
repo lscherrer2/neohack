@@ -25,11 +25,20 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
   before that are ~7° off on lift/elbow — re-teach.
 - Units: body joints -100..100 (0 = calibration mid pose = `home`), gripper 0..100.
   Shoulder/elbow sag ~5 units under gravity when holding a pose.
-- Tracking (measured with `python -m packing tune`, Nov 2026): connect sets servo P=16, accel=254 (LeRobot's values).
-  Main error is **gravity sag on shoulder_lift** (~8 units at rest = ~5 cm at the tip); jitter is
-  small (~0.6 mm). P=32 halves sag but the user found it too stiff, so `servo_p` default is 24 (middle);
-  accel=20 kept (RAM only, re-applied each connect via `RealArm.tune`) + software sag compensation (`motion.sag_gain`, outer integral loop in `Motion._tick`).
-- Verified directions (Nov 2026): gripper 0 = closed, 100 = open; `wrist_flex` + = wrist tips up.
+- Tracking (Nov 2026, measured by tracing `Motion` ticks): servos are P-only (P=24 via `servo_p`) and trail a
+  moving command by ~0.1 s, and gravity makes joints sag ~1-2 units (more mid-move: static friction hides part
+  of it at rest). Motion stack, all in `cell.yaml` `motion:`: `servo_accel: 254` (20 doubled lag — the servo's
+  own profile fights our streamed trajectory) · `lead_s: 0.1` velocity feed-forward · `gravity_gain: 4.15`
+  units/N·m model gravity feed-forward (fit: shoulder 4.17, elbow 4.12, residual ≤0.2 units; real arm only) ·
+  sag integral `bias` learns **only at rest** (learning lag mid-move caused overshoot / flailing) ·
+  `settle_tol: 1`. Result: joints in step within ~3 %, lag ~1 unit, 50 mm IK line within ~5 mm.
+- Directions (Nov 2026): gripper 0 = closed, 100 = open; `elbow_flex` + = forearm down; `wrist_flex` + = gripper
+  tips **down** (an early note said "up" — wrong; the model + a 15° pitch observation settle it).
+- Kinematics zero: URDF 0° = the calibration pose = raw 2047, NOT unit 0 (= range middle). Elbow differs by
+  8.7°; using the range middle (as LeRobot does) left the gripper ~15° off level. `ArmModel.zero_deg` handles it.
+- Workspace: there is a **monitor near the arm** — it was hit during a wide pose sweep (2026-11-07). The
+  height-only clearance check doesn't know about it; keep test motions inside regions already used safely
+  (home / sleep / horizontal / 50 mm push) unless the user OKs a wider area.
 
 ## Moving the arm — rules
 - Physical motion is outward-facing: get the user's explicit OK ("go") before every run that moves

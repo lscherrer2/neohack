@@ -25,7 +25,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from ..config import CellConfig, load_config
 from ..hardware.arm import FakeArm, RealArm
 from ..motion.controller import Motion
-from ..motion.kinematics import ArmModel, load_ranges
+from ..motion.kinematics import ArmModel, gravity_feedforward, load_ranges
 from ..poses import PoseStore
 from .cameras import CameraSpec, RealCameras, SchematicCamera
 from .jog import DIRECTIONS, Jogger, JogResult
@@ -96,7 +96,8 @@ class RemoteRig:
             self.cameras = RealCameras(self.settings.cameras) if self.settings.cameras else None
         self.arm.tune(p_gain=cfg.motion.servo_p, accel=cfg.motion.servo_accel)
         sleep = (lambda s: None) if self.sim else time.sleep
-        motion = Motion(self.arm, PoseStore(cfg.poses_file), cfg.motion, cfg.gripper, sleep=sleep)
+        gravity = None if self.sim else gravity_feedforward(cfg.robot_id, cfg.motion.gravity_gain)
+        motion = Motion(self.arm, PoseStore(cfg.poses_file), cfg.motion, cfg.gripper, sleep=sleep, gravity=gravity)
         self.jogger = Jogger(motion, model, self.settings.limits, self.settings.log_file)
         return self.jogger
 

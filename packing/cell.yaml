@@ -11,7 +11,7 @@ robot:
 
 poses_file: data/poses.json
 inventory_db: data/inventory.db   # or ":memory:" (forgotten when each command exits)
-travel_pose: home          # arm passes through this between stations ('home' = calibration mid-pose)
+travel_pose: home          # arm passes through this between stations ('home' = taught pose; default all-zero mid-pose)
 
 locations:
   part_slots:              # location: sku  (one part sits in each slot)
@@ -42,14 +42,16 @@ gripper:
 motion:
   speed: 30                # units/s (joint range is -100..100)
   approach_speed: 12       # final approach to grasp/release
-  settle_tol: 3            # arrived when every joint is within this (sag comp makes this reachable)
+  settle_tol: 1            # arrived when every joint is within this (sag comp makes this reachable)
   settle_timeout: 3.0
   max_following_error: 20  # stop if a joint lags this much (collision / stall)
   max_step: 25             # library per-command safety cap; must exceed sag_max
   sag_gain: 0.08           # gravity-sag compensation (0 = off)
   sag_max: 15              # max correction, units
+  lead_s: 0.1              # velocity feed-forward: servos trail a moving command by ~0.1 s (measured Nov 2026)
+  gravity_gain: 4.15       # gravity feed-forward, units of sag per N*m (fit Nov 2026; real arm only; 0 = off)
   servo_p: 24              # servo stiffness: 16 = connect default (soft), 32 = factory (stiff); 24 = middle
-  servo_accel: 20          # servo acceleration (connect default 254 = max) — measured best
+  servo_accel: 254         # servo acceleration; 254 = max = follow our trajectory (20 doubled tracking lag, Nov 2026)
 
 remote:                    # LLM contingency control: python -m packing.remote (see packing/README.md)
   default_step_cm: 2

@@ -29,6 +29,9 @@ class MotionCfg:
     fps: int = 50
     sag_gain: float = 0.08  # sag compensation: fraction of the error learned per tick (0 = off)
     sag_max: float = 15.0  # max correction, units
+    lead_s: float = 0.0  # velocity feed-forward: command this many seconds ahead (servo lag ~0.1 s; 0 = off)
+    lead_max: float = 10.0  # cap on the feed-forward, units
+    gravity_gain: float = 0.0  # gravity feed-forward: units of sag per N*m of model gravity torque (real arm only; 0 = off)
     servo_p: int | None = None  # servo P gain for body joints (connect default 16, factory 32)
     servo_accel: int | None = None  # servo acceleration register (connect default 254 = max)
 
