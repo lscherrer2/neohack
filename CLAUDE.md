@@ -59,6 +59,11 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
 - `packing/remote/` — LLM contingency control over MCP (`python -m packing.remote [--sim]`, mcp 2.x:
   `from mcp.server.mcpserver import MCPServer`). `jog.py` direction commands → checked straight lines;
   `safety.py` RemoteLimits safe box; `cameras.py` cv2.VideoCapture or sim schematic; `server.py` tools + LLM instructions.
+- `camera/` — wrist camera access (`camera/README.md`). Claude's shell has no macOS camera permission:
+  the **user** runs `python camera/cam_server.py`, then fetch frames from `http://127.0.0.1:8765/snap.jpg`
+  (check `/info` first). Opens only the "icspring camera" by name — never other cameras.
+- Parts tray (planned, `.claude/plans/tray_layout.md`): `part.dxf` = tray layout (33 pockets: AA, 9V,
+  piezo, glue stick, breadboard), `box.step` = packing box with grab tab (units m). Not implemented yet.
 - CLI: `python -m packing <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|status|events|set-part|set-box|clear-output|pack|move-box> [--sim]`
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`
