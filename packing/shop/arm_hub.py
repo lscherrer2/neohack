@@ -23,6 +23,17 @@ from ..hardware.telemetry import TelemetryArm
 log = logging.getLogger(__name__)
 
 
+# Generic poses for the dashboard's preview toggle (calibrated units; checked with FK to look sensible).
+PREVIEW_POSES: dict[str, tuple[str, dict[str, float]]] = {
+    "home": ("Home (calibration mid pose)", dict(shoulder_pan=0, shoulder_lift=0, elbow_flex=0, wrist_flex=0,
+                                                 wrist_roll=0, gripper=30)),
+    "over_tray": ("Over the tray, pointing down", dict(shoulder_pan=0, shoulder_lift=-15, elbow_flex=0,
+                                                       wrist_flex=85, wrist_roll=0, gripper=40)),
+    "tucked": ("Tucked in", dict(shoulder_pan=0, shoulder_lift=-90, elbow_flex=40, wrist_flex=90,
+                                 wrist_roll=0, gripper=0)),
+}
+
+
 class ArmBusy(RuntimeError):
     """The arm can't do that right now (not connected, port error, packing, calibrating)."""
 
@@ -147,6 +158,17 @@ class ArmHub:
             "stale_s": stale, "error": self.error,
             "joints": s["joints"] if s else None, "frames": s["frames"] if s else None, "tip": s["tip"] if s else None,
         }
+
+    def preview(self, name: str) -> dict:
+        """ArmState for a named generic pose — no arm needed (FK only). KeyError for unknown names."""
+        joints = dict(PREVIEW_POSES[name][1])
+        if self.model is None:
+            raise ArmBusy("kinematics unavailable (placo not installed?)")
+        with self._lock:
+            fr = self.model.link_frames(joints)
+        return {"connected": False, "source": "preview", "torque": None, "mode": "idle", "stale_s": None,
+                "error": None, "joints": joints, "frames": {k: v.round(5).tolist() for k, v in fr.items()},
+                "tip": [round(float(v), 5) for v in fr["gripper_frame_link"][:3, 3]]}
 
     # ---------- packing ----------
     @contextmanager

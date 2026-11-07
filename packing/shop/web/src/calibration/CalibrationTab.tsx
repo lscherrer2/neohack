@@ -41,6 +41,23 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
 
   const stale = stream !== "open" || now - lastMsg.current > STALE_MS;
 
+  // ---- preview toggle: draw the arm in a generic pose (no hardware needed; server computes FK)
+  const [poses, setPoses] = useState<{ name: string; label: string }[]>([]);
+  const [previewName, setPreviewName] = useState<string | null>(null);
+  const [previewArm, setPreviewArm] = useState<ArmState | null>(null);
+  useEffect(() => {
+    api<{ poses: { name: string; label: string }[] }>("GET", "/api/arm/preview")
+      .then((r) => setPoses(r.poses)).catch(() => setPoses([]));
+  }, []);
+  useEffect(() => {
+    if (!previewName) { setPreviewArm(null); return; }
+    let live = true;
+    api<ArmState>("GET", `/api/arm/preview/${previewName}`)
+      .then((a) => { if (live) setPreviewArm(a); }).catch(() => { if (live) setPreviewArm(null); });
+    return () => { live = false; };
+  }, [previewName]);
+  const previewing = previewName !== null && previewArm !== null;
+
   // ---- calibration session
   const [cal, setCal] = useState<Avail<CalSession>>({ data: null, unavailable: null });
   const refreshCal = useCallback(async () => {
@@ -85,10 +102,26 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
   return (
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
-        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={cal.data} highlighted={highlighted} />
+        <Scene arm={previewing ? previewArm : arm.data} stale={previewing ? false : stale} tray={trayLoad.tray}
+               session={cal.data} highlighted={highlighted} />
+        {poses.length > 0 && (
+          <div className="scene-preview">
+            <label>
+              <input type="checkbox" checked={previewName !== null}
+                     onChange={(e) => setPreviewName(e.target.checked ? poses[0].name : null)} />
+              Preview pose
+            </label>
+            {previewName !== null && (
+              <select value={previewName} onChange={(e) => setPreviewName(e.target.value)} aria-label="Preview pose">
+                {poses.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
+              </select>
+            )}
+          </div>
+        )}
         <div className="scene-status">
-          <span className={`dot ${arm.unavailable ? "dot-off" : stale ? "dot-stale" : "dot-live"}`} />
-          {arm.unavailable ? "Arm view not available on the server yet"
+          <span className={`dot ${previewing ? "dot-preview" : arm.unavailable ? "dot-off" : stale ? "dot-stale" : "dot-live"}`} />
+          {previewing ? "Preview — not the real arm"
+            : arm.unavailable ? "Arm view not available on the server yet"
             : stream === "connecting" ? "Connecting to the arm stream…"
             : stale ? (arm.data ? "Arm data stale — showing the last pose" : "No arm data yet")
             : `Live · ${arm.data?.source ?? "?"}`}

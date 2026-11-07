@@ -231,6 +231,17 @@ class CalibrationApiTests(unittest.TestCase):
         self.assertEqual(http.post("/api/arm/connect").status_code, 503)
         self.assertEqual(http.post("/robot/telemetry", json={"joints": {"shoulder_pan": 1.0}}).status_code, 200)
 
+    def test_preview_poses_need_no_arm(self):
+        remote = ArmHub(None, "remote", lambda: MODEL)
+        http = TestClient(create_server(OrderStore(":memory:"), Catalog({}, 1), hub=remote))
+        names = [p["name"] for p in http.get("/api/arm/preview").json()["poses"]]
+        self.assertIn("over_tray", names)
+        st = http.get("/api/arm/preview/over_tray").json()
+        self.assertEqual((st["source"], st["connected"]), ("preview", False))
+        self.assertEqual(list(st["frames"]), ArmModel.LINKS)
+        self.assertAlmostEqual(st["tip"][0], 0.24, delta=0.01)  # out over the tray, pointing down
+        self.assertEqual(http.get("/api/arm/preview/nope").status_code, 404)
+
     def test_remote_telemetry_reaches_view(self):
         remote = ArmHub(None, "remote", lambda: MODEL)
         http = TestClient(create_server(OrderStore(":memory:"), Catalog({}, 1), hub=remote))

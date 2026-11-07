@@ -14,6 +14,7 @@
   GET  /orders  GET /orders/{id}  GET /health
   GET  /dashboard/              React app (packing/shop/web, built into static/app): Orders + Calibration tabs
   GET  /api/arm  /api/arm/stream   live arm state (joints, FK link frames, tip); POST /api/arm/connect|disconnect
+  GET  /api/arm/preview[/{name}]  generic poses drawn without an arm (dashboard preview toggle)
   /api/calibration[...]         tray calibration from the dashboard (start, capture, points, save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
 """
@@ -328,6 +329,21 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/arm/preview")
+    def arm_preview_list():
+        from .arm_hub import PREVIEW_POSES
+
+        return {"poses": [{"name": k, "label": label} for k, (label, _) in PREVIEW_POSES.items()]}
+
+    @app.get("/api/arm/preview/{name}")
+    def arm_preview(name: str):
+        try:
+            return _hub().preview(name)
+        except KeyError as e:
+            raise HTTPException(404, f"no preview pose {name}") from e
+        except ArmBusy as e:
+            raise HTTPException(503, str(e)) from e
 
     @app.post("/api/arm/connect")
     def arm_connect():
