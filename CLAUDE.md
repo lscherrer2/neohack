@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, and the order of work).
+
 Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight over the Feetech servo SDK —
 **no LeRobot** (removed Nov 2026; our driver keeps LeRobot's units and calibration format). The project is
 `packing/`: a teach-and-repeat cell that moves boxes, packs parts from a calibrated parts tray (DXF layout), and
