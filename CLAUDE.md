@@ -61,8 +61,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
     (servo calibration) · `tray_calibrate.py` hand-guided tray calibration (CLI)
-  - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type ·
-    `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard calibration)
+  - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type + plate
+    corner points · `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard
+    calibration, corners/pockets mode) · `goto.py` go-to preview planner
   - `hardware/telemetry.py` `TelemetryArm` (publishes joints on read, throttled; `http_publisher` non-blocking)
   - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
     `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
@@ -122,17 +123,21 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   (humans restock; trust that state). Tests/live checks must use a temp copy of `cell.yaml`
   (`packing.tests.test_tray.temp_config`) so they don't write the real databases / calibration.
 - **Arm ownership**: `shop/arm_hub.py` `ArmHub` owns the arm in the server process (real with `--robot`, FakeArm
-  otherwise; connects on demand, polls ~10 Hz, FK frames). In-process packing borrows it (`RobotPacker(arm_provider=
-  hub.borrow)`); a separate `robot --robot` process opens its own arm and posts `/robot/telemetry`. Calibration
-  turns torque off only after a `confirm_hold` from the UI; `/robot/claim` hands out nothing while calibrating.
+  otherwise; connects on demand, polls ~10 Hz, FK frames). Modes: idle / calibrating / packing / moving (go-to).
+  In-process packing borrows it (`RobotPacker(arm_provider=hub.borrow)`); `shop/goto_runner.py` borrows it for
+  go-to moves; a separate `robot --robot` process opens its own arm and posts `/robot/telemetry`. Torque off only
+  after a `confirm_hold` from the UI, motion only after `confirm_move`; `/robot/claim` hands out nothing while
+  calibrating. Restarting the server drops an unsaved calibration session (points live in memory) and leaves the
+  torque as it was (off if calibrating) until Connect.
 - Robot agent polls `POST /robot/claim` (returns the in-progress order first → resume), reports
   `done`/`failed`, and **exits on a packing failure** (human checks arm).
 - Dashboard = React app (`packing/shop/web/`, served from `static/app/` at `/dashboard/`; old
   `static/dashboard.html` is only a fallback if the build is missing). Tabs: **Orders** (status plate, chat,
   stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via
   SSE `/api/events/stream`, in-memory `events.EventLog`, last 500) and **Calibration** (3D arm + tray view from
-  `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, capture
-  buttons per reference corner + any pocket, live fit, Save/Finish). API contract: `.claude/plans/arm_viz.md`.
+  `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, joint values,
+  Corners/Pockets switch, capture buttons + extra point, live fit, Save/Finish, "Go to point" preview with Stop).
+  API contract: `.claude/plans/arm_viz.md`.
   3D arm = stick figure (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Joints are
   projected into the arm's vertical plane (URDF lift/elbow/wrist origins sit 18.3 mm along their axes — fake jogs
   otherwise); the tool point is the true FK position. Avoid CSS class names that equal event kinds

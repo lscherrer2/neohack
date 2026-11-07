@@ -36,10 +36,17 @@ chat (Claude Haiku) ──MCP──▶ order server ◀──HTTP── robot ag
     failed), ordering chat, stock + 2D tray map (click a pocket to mark it full/empty), the order list, and a live
     activity feed (MCP tool calls, robot pickups, packed/failed orders, tray changes). Events are kept in memory
     (last 500; cleared on server restart).
-  - **Calibration** tab: live 3D view of the arm and the calibrated tray; **Preview pose** shows the arm in a
-    generic pose without hardware. Calibrate the tray: Connect → Start calibration (hold the arm: motors turn
-    off) → touch the gripper tip to each corner pocket and press its Capture button → Save when the fit is OK →
-    Finish (motors back on, holding). The arm is owned by the server's `ArmHub` (`arm_hub.py`).
+  - **Calibration** tab: live 3D view of the arm (stick figure; red dot = tool point) and the calibrated tray,
+    plus the joint values; **Preview pose** shows the arm in a generic pose without hardware. The real arm needs
+    `start --robot` (otherwise the panel warns that the arm is simulated).
+    - Calibrate the tray: Connect → Start calibration (hold the arm: motors turn off) → **Plate corners** mode
+      (default): put the red-dot tip on the middle of each rounded plate corner, on the top edge, and press its
+      Capture button (or switch to **Pocket centers**; any pocket/corner can be added as an extra point) → Save
+      when the fit is OK (≤ 3 mm RMS) → Finish (motors back on, holding).
+    - **Go to point (preview)**: pick a corner/pocket and a stand-off (default ½ in) → Go to… → read the plan in
+      the confirm dialog → the arm moves slowly to just off that point along the tray normal; **Stop** halts it.
+      Uses the live fit while calibrating (motors turn on first), else the saved calibration.
+    - The arm is owned by the server's `ArmHub` (`arm_hub.py`); go-to moves run in `goto_runner.py`.
 - Any MCP client can use the server, e.g. Claude Desktop / Claude Code (`http://localhost:8000/mcp`),
   or later a voice agent.
 

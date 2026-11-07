@@ -25,9 +25,13 @@ python -m packing.tools.calibrate range 60  # move every joint end to end during
 python -m packing where            # joint values + tip position
 python -m packing teach-all        # teach the cell's poses with the keyboard
 python -m packing pack             # package boxes
-python -m packing.shop start       # order server + dashboard (http://localhost:8000/dashboard)
+python -m packing.shop start --robot   # order server + dashboard on the real arm (http://localhost:8000/dashboard/)
+                                       #   Orders tab + Calibration tab (live 3D arm, tray calibration, go-to preview)
+python -m packing tray-calibrate   # tray calibration from the terminal (motors off, touch the 4 plate corners)
 python -m packing.remote           # MCP server for LLM control
 ```
-Add `--sim` to run against a simulated arm. Tests: `python -m unittest discover -s packing/tests -t .`
+Add `--sim` (before the command) to run against a simulated arm; `packing.shop start` without `--robot` uses a
+simulated arm. Tests: `python -m unittest discover -s packing/tests -t .`
+Dashboard source: `packing/shop/web/` (Node: `npm install && npm run build`; the build is committed).
 
 Details: `packing/README.md`, `packing/shop/README.md`, `CLAUDE.md`.

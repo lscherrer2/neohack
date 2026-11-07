@@ -1,9 +1,11 @@
 # Plan: live 3D view of the arm + calibrated tray on the dashboard
 
-Status (2026-11-07): **backend built** (branch `tray-core`): `ArmModel.link_frames`, `hardware/telemetry.py`,
-`shop/arm_hub.py`, `tray/session.py`, arm/calibration/telemetry endpoints, `RobotPacker(arm_provider|telemetry)`,
-shop `--robot` on `serve`; sim hub saves `sim_tray_cal.json`; claim returns nothing while calibrating.
-Tests: `packing/tests/test_arm_view.py`. React app: in progress. Depends on the tray work in `tray_layout.md`
+Status (2026-11-07): **built and in use on the real arm** (branch `tray-core`). Backend: `ArmModel.link_frames`,
+`hardware/telemetry.py`, `shop/arm_hub.py`, `tray/session.py` (corners/pockets mode), `tray/goto.py` +
+`shop/goto_runner.py` (go-to preview), arm/calibration/telemetry/preview/go-to endpoints,
+`RobotPacker(arm_provider|telemetry)`, shop `--robot` on `serve`; sim hub saves `sim_tray_cal.json`; claim returns
+nothing while calibrating. React app (`packing/shop/web/`): Orders + Calibration tabs, built into `static/app/`.
+Tests: `packing/tests/test_arm_view.py`. First real tray calibration saved 2026-11-07 (2.15 mm RMS, tray tilted 69°). Depends on the tray work in `tray_layout.md`
 (DXF reader + calibration) for the tray part. Boxes / drop spot are added later.
 
 ## Goal
@@ -84,7 +86,7 @@ pocket toggles full/empty) and **Calibration** (3D view + calibration controls).
 ### Endpoints (JSON)
 ArmState = {
   "connected": bool, "source": "sim"|"real"|"remote"|null, "torque": bool|null,
-  "mode": "idle"|"calibrating"|"packing", "stale_s": number|null, "error": string|null,
+  "mode": "idle"|"calibrating"|"packing"|"moving", "stale_s": number|null, "error": string|null,
   "joints": {shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper} | null,  // units
   "frames": {"<link>": 4x4 row-major number[][]} | null,  // robot base frame, meters, z up
   "tip": [x, y, z] | null                                  // meters
@@ -95,10 +97,23 @@ ArmState = {
 - GET  /api/arm/stream         → SSE, `data: <ArmState JSON>` ~10 Hz
 - POST /api/arm/connect        → ArmState; 409 {"detail": msg} if busy / port error
 - POST /api/arm/disconnect     → ArmState (torque stays on; refused while calibrating/packing)
+- GET  /api/arm/preview        → {"poses": [{"name", "label"}]}; GET /api/arm/preview/{name} → ArmState
+                                 (source "preview": FK of a generic pose, no arm needed; "home" = calibration center)
+- POST /api/arm/goto {"point", "confirm_move": false, "standoff_mm": 12.7}
+                               → {"plan": {point, point_robot_m, standoff_mm, approach_mm, tilt_deg, travel_units,
+                                  line_mm, approach_pose, end_pose}, "calibration": "live fit"|"saved calibration",
+                                  "motors_will_turn_on": bool, "started": bool}
+                                 confirm_move=false = dry run (plan only); true = start the move (mode "moving").
+                                 409 not connected / busy / no calibration; 422 unreachable; 404 unknown point.
+- GET  /api/arm/goto           → {"running": bool, "last": {"plan", "status": running|done|stopped|failed, "error"}}
+- POST /api/arm/stop           → {"stopping": bool}  (halts at the next control tick, holds)
+- POST /api/arm/release {"confirm_hold": true} → ArmState (motors off again during calibration, after a go-to)
 
 CalSession = {
-  "active": bool,                       // motors off, capturing
-  "reference_points": [{"pocket": "aa_1", "label": "Bottom-left", "captured": bool}],
+  "active": bool,                       // capturing (motors off unless a go-to turned them on)
+  "mode": "corners"|"pockets",          // which reference points the capture buttons use
+  "reference_points": [{"pocket": "corner_bl", "label": "Bottom-left corner", "captured": bool}],
+                                        // "pocket" = point id: corner_bl/tl/br/tr or a pocket id ("aa_1", label "Bottom-left")
   "points": [{"pocket", "label": string|null, "tray_mm": [x, y], "robot_m": [x, y, z], "residual_mm": number|null}],
   "fit": null | {"ok": bool, "error": string|null, "rms_mm": number|null, "tilt_deg": number|null,
                  "warnings": string[], "grip_angles": {"<sku>": deg}, "matrix": 4x4|null},
@@ -106,20 +121,25 @@ CalSession = {
 }
 - GET    /api/calibration                    → CalSession
 - POST   /api/calibration/start  {"confirm_hold": true}   → connects if needed, torque OFF (arm goes limp)
-- POST   /api/calibration/capture {"pocket": "aa_1"}      → reads tip now (averaged), adds/replaces point
+- POST   /api/calibration/mode {"mode": "corners"|"pockets"} → CalSession (captured points are kept)
+- POST   /api/calibration/capture {"pocket": "corner_bl"} → reads tip now (averaged), adds/replaces point
+                                                            (409 while the motors are on)
 - DELETE /api/calibration/points/{pocket}
 - POST   /api/calibration/save                → saves fit (409 if fit not ok) → CalSession
 - POST   /api/calibration/finish {"confirm_hold": true}   → torque ON at current pose, session cleared
   400 if confirm_hold missing; 409 when the arm is packing / not available.
-- Tray geometry/state: existing GET /api/tray (outline, pockets with shape/full/robot_m, calibration.matrix),
+- Tray geometry/state: existing GET /api/tray (outline, pockets with shape/full/robot_m, corners [{id, label, x, y}],
+  calibration.matrix),
   POST /api/tray/pockets/{id} {"full"}, POST /api/tray/fill {"full", "sku"?}.
 
 ### Frontend
 - `packing/shop/web/` Vite + React + TS (+ three, @react-three/fiber, @react-three/drei). Vite `base: "/dashboard/"`,
   `build.outDir: "../static/app"` (committed). FastAPI serves it at `/dashboard`. Dev: `npm run dev` proxies
   `/api`, `/robot`, `/orders`, `/health` to :8000.
-- 3D: robot z-up → wrap scene in a group rotated -90° about x. Arm = capsules between consecutive link
-  origins + small boxes for gripper/jaw + tip sphere. Tray = thin rounded plate placed by
+- 3D: robot z-up → wrap scene in a group rotated -90° about x. Arm (as built, after user feedback) = stick figure:
+  a line per segment through the joints projected into the arm's vertical plane, an arc per joint bend, a ring at
+  the pan joint, the moving jaw as a V with the fixed finger, a bright red dot at the tool point; base = square on
+  the table centered on the pan axis. Plate corners get small cross markers. Tray = thin rounded plate placed by
   `calibration.matrix` (tray mm → m), pockets drawn on its face, full pockets show a 10 mm item stub.
   Uncalibrated: draw the tray ghosted at a default spot in front of the arm with a "not calibrated" label.
   Captured points = spheres at robot_m, highlighted target pocket = the one being captured.

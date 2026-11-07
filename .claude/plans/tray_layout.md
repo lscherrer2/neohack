@@ -1,14 +1,18 @@
 # Plan: DXF parts tray → slots, calibration, picking, dashboard
 
-Status (2026-11-07): **tray core built** on branch `tray-core` — DXF layout, config, calibration math +
-hand-guided `tray-calibrate`, pocket inventory, tray API (`/api/tray*`), tests in `packing/tests/test_tray.py`.
-**Not yet:** picking from pockets (`Cell.pick_tray`, per-type grip width), dashboard UI (React port, see
-`arm_viz.md`), box + drop spot. Not yet tried on the real arm.
+Status (2026-11-07): **tray core + dashboard calibration built** on branch `tray-core` — DXF layout, config,
+calibration math, hand-guided `tray-calibrate` + dashboard Calibration tab (corners mode default), pocket inventory,
+tray API (`/api/tray*`), go-to preview, tests in `packing/tests/test_tray.py` / `test_arm_view.py`.
+**Calibrated on the real arm** 2026-11-07 (plate corners, 2.15 mm RMS, tray tilted 69° from flat; user checked a
+go-to visually). Kinematics fixed the same day: URDF zero = `calibrate center` pose (see CLAUDE.md).
+**Not yet:** picking from pockets (`Cell.pick_tray`, per-type grip width), box handling + drop spot, optional
+table-touch joint-offset calibration (only if tip-on-table readings drift beyond ~±5 mm).
 
 As built (differs from the design below): DXF read with **ezdxf** (loops via `ezdxf.edgeminer`, polylines
 exploded), rigid fit with **scipy** `Rotation.align_vectors`; fit rejected above **3 mm RMS**
 (one point 10 mm off of 4 gives ~3.3 mm); config keys `size`/`spacing`/`grip_axis` per type, no
-`grip_width` yet; `reference_points` in config; sim uses `sim_tray_cal.json`. Code: `packing/tray/`
+`grip_width` yet; `calibration_mode: corners|pockets` (corners = middle of each R12 plate corner, ids
+`corner_bl/tl/br/tr`) + `reference_points` (pockets mode) in config; sim uses `sim_tray_cal.json`. Code: `packing/tray/`
 (`dxf.py`, `layout.py`, `calibration.py`), `packing/tools/tray_calibrate.py`, CLI `tray` / `tray-calibrate`.
 
 ## Goal
@@ -68,7 +72,7 @@ for tray picks (breadboard 2.5 mm < current 3 mm threshold).
   geometric corner is in mid-air; pocket centers are precise.)
 - Tip position per point via `ArmModel.tip()` (FK on `gripper_frame_link`).
 - Fit rigid transform tray→robot (Kabsch / SVD, DXF points at z=0) → `R, t`. Report per-point
-  residual; refuse to save if RMS > ~4 mm. Tray normal = `R[:,2]` (sign chosen to point away from
+  residual; refuse to save if RMS > 3 mm (as built). Tray normal = `R[:,2]` (sign chosen to point away from
   the table).
 - Sanity checks (warn, not enforce): tray center azimuth plane contains the normal ("faces the
   swivel"); tilt angle reported.
