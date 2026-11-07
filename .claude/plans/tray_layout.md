@@ -1,6 +1,6 @@
 # Plan: DXF parts tray → slots, calibration, picking, dashboard
 
-Status: **design, not started** (2026-11-07). Open questions at the bottom.
+Status: **design, not started** (2026-11-07). Tray scope decided; box + drop spot are TODO.
 
 ## Goal
 Replace the 4 placeholder `part_slots` with a tilted, clamped parts tray whose pocket layout comes
@@ -41,8 +41,9 @@ tray:
   extract_mm: 120
   approach_mm: 30          # stand-off above the item top before descending
   types:                   # sku -> how to find it in the DXF + how to grip it
+    # grip: fingers close along tray x (left-right) for all but breadboard (along tray y)
     aa:         {feature: circle, diameter: 15.5, name: AA battery,  grip_width: 14.5}
-    9v:         {feature: rect, size: [27.5, 18.5], name: 9V battery, grip_width: 17.5}
+    9v:         {feature: rect, size: [27.5, 18.5], name: 9V battery, grip_width: 26.5}
     piezo:      {feature: pin_pair, pin_diameter: 1.3, spacing: 8, name: piezo speaker, grip_width: 12}
     glue:       {feature: circle, diameter: 12.5, name: glue stick, grip_width: 12}
     breadboard: {feature: slot, size: [52, 2.5], name: breadboard, grip_width: 2.5}
@@ -99,8 +100,37 @@ stick in a Ø12.5 hole may bind. Mitigations: put the tray's short side (columns
 view, keep the tray as far/narrow as reach allows, or accept and test. Planner will compute and
 report the worst-case angle per pocket after calibration.
 
+**Accepted by the user** (2026-11-07): tray will be placed far enough away; slight angle is OK.
+Orientation confirmed: DXF x-axis runs left→right across the arm's view (AA column on the arm's
+left, breadboards on the right), DXF y=0 row (bottom edge) nearest the arm, tray tilted back toward
+the ceiling. Tray center x = 89.4 mm, so the piezo column is on the centerline. Angle per column vs
+horizontal distance from the pan axis to the tray:
+
+| column | lateral offset | 200 mm | 250 mm | 300 mm | 350 mm |
+|---|---|---|---|---|---|
+| aa | −89 mm | 24° | 20° | 17° | 14° |
+| 9v | −39 mm | 11° | 9° | 7° | 6° |
+| piezo | 0 | 0° | 0° | 0° | 0° |
+| glue | +25 mm | 7° | 6° | 5° | 4° |
+| breadboard | +69 mm | 19° | 16° | 13° | 11° |
+
+
+## Decisions (2026-11-07)
+- **Grip direction:** fingers close along tray x (left↔right as seen from the arm) for aa, 9v
+  (across its 26.5 mm side — only ~7 mm gap between 9Vs vertically), piezo, glue. **Breadboard:**
+  fingers close along tray y ("vertical grab", across the 2.5 mm thickness). Store as per-type
+  `grip_axis: x|y` in the tray plane; wrist roll derived from it + calibration.
+- **Calibration UX:** motors off, user hand-guides the closed gripper tip to each reference point
+  and presses Enter; warn to hold the arm before torque off.
+- **Destination:** item goes into a box (see below). A fixed drop spot will also be defined.
+
+## TODO later (out of scope for the first build)
+- **Box handling.** Box model in `box.step` (STEP AP242, Onshape; units meters). Bounding box:
+  76.2 × 76.2 mm square (3 in), 77 mm tall, rounded corners, with a horizontal **grab tab** sticking
+  out ~22.9 mm from one side at the top rim (y down to −60.96 mm). Arm grabs the tab to move boxes.
+  Needs its own calibration (box supply / pack / output positions) — same hand-guide + Enter flow.
+- **Drop spot** definition + calibration.
+
 ## Open questions
-1. Which tray direction faces the arm (DXF x-axis = columns left→right, or y-axis)?
-2. Order flow after the pick: still box supply → pack station → box output, or drop the item somewhere simpler?
-3. Gripper roll for 9V (grip across 18.5 or 27.5?) and breadboard (fingers across 2.5 mm thickness?).
-4. Calibration: hand-guide with torque off (proposed) or jog with keys?
+1. ~~Which tray direction faces the arm~~ — answered (see risk section).
+2–4. Answered (see Decisions).
