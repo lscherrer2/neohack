@@ -28,80 +28,78 @@ function defaultTrayMatrix(o: TrayState["outline"]): Mat4 {
 }
 
 // ---------------------------------------------------------------- arm
-// Every block is drawn in its own link frame. Link frames are square to the arm's geometry, so blocks
-// stay aligned with each other and meet at the joints in every pose. A link block spans from its joint
-// origin to the next joint origin (expressed in that frame), padded to a cross-section.
-// Local coordinates below are meters, measured from the URDF (packing/urdf/so101_new_calib.urdf).
+// Stick figure through the real joint axes (from the URDF via the server's FK): one line per segment, an arc
+// at each bend showing the joint angle, a short line for the moving jaw, and a bright red dot at the tool
+// point (the point touched to pockets during calibration). Robot frame, meters.
 
-type Box = { lo: Vec3; hi: Vec3 };
-const pad = (a: number[], b: number[], r: number): Box => ({
-  lo: [0, 1, 2].map((i) => Math.min(a[i], b[i]) - r) as Vec3,
-  hi: [0, 1, 2].map((i) => Math.max(a[i], b[i]) + r) as Vec3,
-});
+const PAN_AXIS: Vec3 = [0.0388, 0, 0]; // pan (swivel) axis on the table, base_link frame
+const PAN_TOP = 0.0624; // height of the pan joint
+const CHAIN = ["shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link", "gripper_link", "gripper_frame_link"];
+const BENDS = ["upper_arm_link", "lower_arm_link", "wrist_link"]; // shoulder lift, elbow, wrist flex
+// Moving jaw fingertip in the jaw's own frame (meets the fixed finger when closed), and its pivot.
+const JAW_PIVOT: Vec3 = [0, 0, 0.019];
+const JAW_TIP: Vec3 = [-0.0147, -0.0785, 0.019];
+const ARC_R = 0.018;
 
-/** Chain links: [link, next link, half-thickness]. */
-const LINKS: [string, string, number][] = [
-  ["shoulder_link", "upper_arm_link", 0.017],   // pan housing up to the shoulder-lift servo
-  ["upper_arm_link", "lower_arm_link", 0.016],  // upper arm
-  ["lower_arm_link", "wrist_link", 0.015],      // forearm
-  ["wrist_link", "gripper_link", 0.015],        // wrist-flex housing over to the roll axis
-];
-// Gripper, in gripper_link's frame: tool point is at (-0.0079, -0.0002, -0.0981), jaw pivot at (0.020, 0.019, -0.023).
-const GRIPPER_BODY: Box = { lo: [-0.016, -0.018, -0.045], hi: [0.03, 0.03, 0.006] };
-const FIXED_FINGER: Box = { lo: [-0.013, -0.009, -0.1], hi: [-0.003, 0.009, -0.04] };
-// Moving jaw, in its own frame: from the pivot to its fingertip (where it meets the fixed finger when closed).
-const JAW_A: Vec3 = [0, 0, 0.019];
-const JAW_B: Vec3 = [-0.0147, -0.0785, 0.019];
+const inFrame = (m: Mat4, p: Vec3) => new THREE.Vector3(...p).applyMatrix4(toMatrix(m));
 
-const local = (m: Mat4, p: THREE.Vector3) => p.clone().applyMatrix4(toMatrix(m).invert());
-
-function BoxIn({ m, box, color, opacity }: { m: Mat4; box: Box; color: string; opacity: number }) {
-  const center = box.lo.map((v, i) => (v + box.hi[i]) / 2) as Vec3;
-  const size = box.lo.map((v, i) => box.hi[i] - v) as Vec3;
-  return (
-    <group matrixAutoUpdate={false} matrix={toMatrix(m)}>
-      <mesh position={center}>
-        <boxGeometry args={size} />
-        <meshStandardMaterial color={color} transparent={opacity < 1} opacity={opacity} />
-      </mesh>
-    </group>
-  );
+/** Arc at joint j between the directions to its neighbours a and b. */
+function arcPoints(a: THREE.Vector3, j: THREE.Vector3, b: THREE.Vector3, r = ARC_R, n = 16): THREE.Vector3[] {
+  const u = a.clone().sub(j).normalize(), v = b.clone().sub(j).normalize();
+  const angle = Math.acos(THREE.MathUtils.clamp(u.dot(v), -1, 1));
+  if (angle < 1e-3) return [];
+  const axis = new THREE.Vector3().crossVectors(u, v);
+  if (axis.lengthSq() < 1e-9) axis.set(0, 0, 1); // straight: any perpendicular works for a half circle
+  axis.normalize();
+  return Array.from({ length: n + 1 }, (_, i) =>
+    u.clone().applyAxisAngle(axis, (angle * i) / n).multiplyScalar(r).add(j));
 }
 
-/** Box from local point a to b (long axis along a->b) in frame m, square cross-section `w` x `t`. */
-function BarIn({ m, a, b, w, t, color, opacity }: { m: Mat4; a: Vec3; b: Vec3; w: number; t: number; color: string; opacity: number }) {
-  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
-  const dir = B.clone().sub(A);
-  const len = dir.length();
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-  return (
-    <group matrixAutoUpdate={false} matrix={toMatrix(m)}>
-      <mesh position={A.add(B).multiplyScalar(0.5)} quaternion={q}>
-        <boxGeometry args={[w, len + w, t]} />
-        <meshStandardMaterial color={color} transparent={opacity < 1} opacity={opacity} />
-      </mesh>
-    </group>
-  );
+function Base() {
+  const [x, y] = PAN_AXIS, h = 0.045; // square footprint centered on the pan axis
+  const sq: Vec3[] = [[x - h, y - h, 0], [x + h, y - h, 0], [x + h, y + h, 0], [x - h, y + h, 0], [x - h, y - h, 0]];
+  return <Line points={sq} color={C.ink} lineWidth={2} />;
 }
 
 function Arm({ arm, stale }: { arm: ArmState; stale: boolean }) {
   const f = arm.frames!;
-  const op = stale ? 0.45 : 1;
-  const light = stale ? C.ghost : C.steel, dark = stale ? C.ghost : C.ink;
+  const color = stale ? C.ghost : C.ink, accent = stale ? C.ghost : C.steel;
+  const chain = [new THREE.Vector3(PAN_AXIS[0], PAN_AXIS[1], 0),
+                 ...CHAIN.filter((l) => f[l]).map((l) => origin(f[l]))];
+  const arcs = BENDS.map((l) => {
+    const i = CHAIN.indexOf(l) + 1; // +1: chain[0] is the base point
+    return f[l] && chain[i - 1] && chain[i + 1] ? arcPoints(chain[i - 1], chain[i], chain[i + 1]) : [];
+  }).filter((pts) => pts.length > 1);
+  // Moving jaw: from where its pivot sits along the gripper line (wrist roll -> tool point) out to its fingertip,
+  // so it forms a V with the fixed finger that closes as the gripper closes.
+  let jaw: THREE.Vector3[] | null = null;
+  if (f[JAW] && f.gripper_link && f.gripper_frame_link) {
+    const g0 = origin(f.gripper_link), g1 = origin(f.gripper_frame_link);
+    const along = new THREE.Line3(g0, g1).closestPointToPoint(inFrame(f[JAW], JAW_PIVOT), true, new THREE.Vector3());
+    jaw = [along, inFrame(f[JAW], JAW_TIP)];
+  }
   return (
     <group>
-      {LINKS.filter(([l, n]) => f[l] && f[n]).map(([l, n, r], i) => (
-        <BoxIn key={l} m={f[l]} box={pad([0, 0, 0], local(f[l], origin(f[n])).toArray(), r)}
-               color={i % 2 ? dark : light} opacity={op} />
-      ))}
-      {f.gripper_link && <BoxIn m={f.gripper_link} box={GRIPPER_BODY} color={light} opacity={op} />}
-      {f.gripper_link && <BoxIn m={f.gripper_link} box={FIXED_FINGER} color={dark} opacity={op} />}
-      {f[JAW] && <BarIn m={f[JAW]} a={JAW_A} b={JAW_B} w={0.01} t={0.018} color={dark} opacity={op} />}
+      <Line points={chain} color={color} lineWidth={4} />
+      {arcs.map((pts, i) => <Line key={i} points={pts} color={accent} lineWidth={2} />)}
+      {/* pan joint: a small ring around the vertical axis */}
+      <Line points={Array.from({ length: 25 }, (_, i) => [PAN_AXIS[0] + ARC_R * Math.cos((i / 24) * 2 * Math.PI),
+                                                         PAN_AXIS[1] + ARC_R * Math.sin((i / 24) * 2 * Math.PI), PAN_TOP] as Vec3)}
+            color={accent} lineWidth={2} />
+      {jaw && <Line points={jaw} color={color} lineWidth={3} />}
       {arm.tip && (
-        <mesh position={arm.tip}>
-          <boxGeometry args={[0.008, 0.008, 0.008]} />
-          <meshStandardMaterial color={C.safety} emissive={C.safety} emissiveIntensity={stale ? 0 : 0.4} />
-        </mesh>
+        <group position={arm.tip}>
+          <mesh>
+            <sphereGeometry args={[0.0045, 16, 12]} />
+            <meshBasicMaterial color="#ff1a1a" toneMapped={false} />
+          </mesh>
+          {!stale && (
+            <mesh>
+              <sphereGeometry args={[0.009, 16, 12]} />
+              <meshBasicMaterial color="#ff3030" transparent opacity={0.3} toneMapped={false} depthWrite={false} />
+            </mesh>
+          )}
+        </group>
       )}
     </group>
   );
@@ -255,19 +253,15 @@ export default function Scene({ arm, stale, tray, session, highlighted }: {
 
   return (
     <>
-    <Canvas camera={{ position: [0.05, 0.55, 0.62], fov: 40, near: 0.01, far: 20 }} dpr={[1, 2]}>
+    <Canvas camera={{ position: [0.17, 0.5, 0.6], fov: 40, near: 0.01, far: 20 }} dpr={[1, 2]}>
       <color attach="background" args={["#E4E9EE"]} />
       <hemisphereLight args={["#ffffff", "#8A96A3", 0.9]} />
       <directionalLight position={[1, 2, 1.5]} intensity={1.4} />
       <Grid args={[2, 2]} cellSize={0.05} sectionSize={0.25} cellColor="#B7C2CD" sectionColor="#7F8E9C"
             fadeDistance={3} infiniteGrid position={[0, 0, 0]} />
-      <OrbitControls target={[0.18, 0.06, 0]} makeDefault enableDamping />
+      <OrbitControls target={[0.17, 0.1, 0]} makeDefault enableDamping />
       <group rotation={ROBOT_TO_THREE}>
-        {/* fixed base block under the pan housing (pan axis at x = 0.0388, top at z = 0.0624) */}
-        <mesh position={[0.03, 0, 0.0312]}>
-          <boxGeometry args={[0.1, 0.08, 0.0624]} />
-          <meshStandardMaterial color={C.ink} />
-        </mesh>
+        <Base />
         {arm?.frames && <Arm arm={arm} stale={stale} />}
         {tray && (
           <Tray tray={tray} highlighted={highlighted} matrix={trayMatrix!} ghost={!tray.calibration} />

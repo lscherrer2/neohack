@@ -120,7 +120,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   SSE `/api/events/stream`, in-memory `events.EventLog`, last 500) and **Calibration** (3D arm + tray view from
   `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, capture
   buttons per reference corner + any pocket, live fit, Save/Finish). API contract: `.claude/plans/arm_viz.md`.
-  3D arm = boxes drawn in each link's frame (no meshes). Avoid CSS class names that equal event kinds
+  3D arm = stick figure through the joint axes (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Avoid CSS class names that equal event kinds
   (`tool/robot/order/chat/error/system`) — they collide with the activity list styles.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
 
