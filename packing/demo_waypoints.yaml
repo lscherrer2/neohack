@@ -1,0 +1,29 @@
+# Conservative waypoint demo:  python -m packing demo   (add --sim to dry-run)
+#
+# Waypoints (joints you leave out are 0 = home / calibration mid-pose):
+#   {shoulder_pan: -15, ...}          joint values, -100..100
+#   {pose: my_taught_pose}            a pose saved with `teach`
+#   {from: A, offset_mm: [x, y, z]}   A's gripper tip shifted (x forward, y left, z up)
+# Sequence steps:
+#   A          joint move: every joint glides together -> tip moves in a gentle CURVE
+#   {line: A}  linear move: tip moves in a STRAIGHT LINE (inverse kinematics every 3 mm)
+# Everything is planned and checked (reachability, joint limits, max_offset) before moving.
+
+speed: 40            # joint moves, units/s
+line_speed_mm_s: 50  # straight-line moves, average tip speed (peak ~1.5x)
+dwell: 0.3           # seconds to pause at each checkpoint
+max_offset: 25       # refuse any waypoint further than this from home on any joint
+
+waypoints:
+  A: {shoulder_pan: -15, wrist_flex: 10}   # turned one way, tip down a little
+  B: {shoulder_pan: 15, wrist_flex: 10}    # turned the other way
+  C: {from: A, offset_mm: [0, 0, 30]}      # 3 cm straight above A
+
+sequence:
+  - home
+  - A            # curve
+  - B            # A -> B as a curve (arc around the base)
+  - {line: A}    # B -> A as a straight line (cuts the chord)
+  - {line: C}    # straight up 3 cm
+  - {line: A}    # straight back down
+  - home

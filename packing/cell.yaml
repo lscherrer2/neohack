@@ -1,0 +1,66 @@
+# Packing cell layout. Edit to match your table, then: python -m packing check
+#
+# Every LOCATION name below gets two taught poses:
+#   <name>.above   safe spot a few cm above it (gripper clear of everything)
+#   <name>.at      where the gripper closes / opens
+# Teach them with: python -m packing teach-all --missing
+
+robot:
+  port: /dev/cu.usbmodem5CE51213501
+  id: my_awesome_follower_arm
+
+poses_file: data/poses.json
+inventory_db: data/inventory.db   # or ":memory:" (forgotten when each command exits)
+travel_pose: home          # arm passes through this between stations ('home' = calibration mid-pose)
+
+locations:
+  part_slots:              # location: sku  (one part sits in each slot)
+    part_A1: A
+    part_A2: A
+    part_B1: B
+    part_B2: B
+  box_supply: [box_in_1, box_in_2]     # where empty boxes start
+  pack_station: pack_1                 # box sits here while parts go in
+  box_output: [box_out_1, box_out_2]   # where finished boxes go
+
+catalog:                   # sku -> name the voice agent uses (SKUs must match part_slots)
+  A: widget
+  B: gadget
+
+box_slots:                 # positions inside the box *at the pack station*, filled in order
+  - {pose: box_slot_1, sku: A}
+  - {pose: box_slot_2, sku: B}
+
+gripper:
+  open: 60                 # VERIFY with keys mode (y/h): which value is open vs closed on your arm
+  closed: 0
+  speed: 40
+  squeeze: 3
+  min_part_width: 3        # if the gripper closes tighter than this, the pick counts as missed
+  min_box_width: 10
+
+motion:
+  speed: 30                # units/s (joint range is -100..100)
+  approach_speed: 12       # final approach to grasp/release
+  settle_tol: 3            # arrived when every joint is within this (sag comp makes this reachable)
+  settle_timeout: 3.0
+  max_following_error: 20  # stop if a joint lags this much (collision / stall)
+  max_step: 25             # library per-command safety cap; must exceed sag_max
+  sag_gain: 0.08           # gravity-sag compensation (0 = off)
+  sag_max: 15              # max correction, units
+  servo_p: 24              # servo stiffness: 16 = LeRobot default (soft), 32 = factory (stiff); 24 = middle
+  servo_accel: 20          # servo acceleration (LeRobot default 254 = max) — measured best
+
+remote:                    # LLM contingency control: python -m packing.remote (see packing/README.md)
+  default_step_cm: 2
+  max_step_cm: 5
+  tip_speed_mm_s: 20       # slow
+  min_z_m: 0.04            # safe box for the gripper tip (robot frame, meters; z=0 = bottom of base)
+  max_z_m: 0.35
+  min_reach_m: 0.12
+  max_reach_m: 0.40
+  max_side_m: 0.30
+  joint_limit: 90
+  log_file: data/remote_log.jsonl
+  cameras: []              # e.g. [{name: front, index_or_path: 0}, {name: wrist, index_or_path: 1}]
+                           # find indices with: lerobot-find-cameras opencv

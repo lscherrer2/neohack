@@ -1,0 +1,1 @@
+Hi {{customer_name}}, this is the shop calling. Your order number {{order_id}}, {{items}}, is packed and ready for pickup.

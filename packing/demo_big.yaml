@@ -1,0 +1,35 @@
+# Bigger straight-line demo:  python -m packing demo --file packing/demo_big.yaml
+#
+# From a center point the gripper tip draws straight lines:
+#   20 cm left <-> right, 8 cm forward <-> back, 8 cm straight up and down,
+# all at constant height / reach / tool tilt (except the vertical one). Every joint stays within
+# 34 of home (-100..100); checked before moving.
+
+speed: 40             # joint moves (only home <-> C), units/s
+line_speed_mm_s: 60   # average tip speed on lines (peak ~1.5x); scale with --speed
+dwell: 0.3
+max_offset: 40
+
+waypoints:
+  C:  {shoulder_lift: 5, elbow_flex: 10, wrist_flex: -10}   # center, tip ~40 cm forward, ~18 cm up
+  L:  {from: C, offset_mm: [0, 100, 0]}     # 10 cm left
+  R:  {from: C, offset_mm: [0, -100, 0]}    # 10 cm right
+  F:  {from: C, offset_mm: [40, 0, 0]}      # 4 cm further out
+  Bk: {from: C, offset_mm: [-40, 0, 0]}     # 4 cm back in
+  U:  {from: C, offset_mm: [0, 0, 80]}      # 8 cm up
+
+sequence:
+  - home
+  - C
+  - {line: L}    # left
+  - {line: R}    # all the way right (20 cm straight sweep)
+  - {line: C}
+  - {line: F}    # out
+  - {line: Bk}   # in (8 cm)
+  - {line: C}
+  - {line: U}    # straight up
+  - {line: C}    # straight down
+  - {line: L}    # and a diagonal-free return: left...
+  - {line: R}    # ...right again
+  - {line: C}
+  - home

@@ -1,0 +1,31 @@
+# "Is the IK real?" demo:  python -m packing demo --file packing/demo_square.yaml
+#
+# The gripper tip traces a flat 6 cm square, then a straight 6 cm vertical plunge — at constant
+# tool angle. Straight edges and constant height need shoulder, elbow AND wrist moving together in
+# changing ratios (pure joint moves would give arcs). Watch the tip against a ruler or the table edge.
+
+speed: 40            # joint moves, units/s
+line_speed_mm_s: 50   # average tip speed on lines (peak ~1.5x); scale with --speed
+dwell: 0.2
+max_offset: 30        # still conservative: every joint stays within 30 of home (-100..100)
+
+waypoints:
+  S:  {shoulder_lift: 10, elbow_flex: 10, wrist_flex: -5}   # start: a bit lower and closer than home
+  P1: {from: S, offset_mm: [30, 30, 0]}     # square corners, 6 cm sides, same height
+  P2: {from: S, offset_mm: [30, -30, 0]}
+  P3: {from: S, offset_mm: [-30, -30, 0]}
+  P4: {from: S, offset_mm: [-30, 30, 0]}
+  UP: {from: S, offset_mm: [0, 0, 60]}      # 6 cm straight up
+
+sequence:
+  - home
+  - S
+  - {line: P1}
+  - {line: P2}   # sideways edge
+  - {line: P3}   # in-toward-base edge: shoulder+elbow+wrist all change
+  - {line: P4}
+  - {line: P1}
+  - {line: S}
+  - {line: UP}   # vertical plunge up...
+  - {line: S}    # ...and straight back down
+  - home

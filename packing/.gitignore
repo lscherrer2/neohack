@@ -1,0 +1,6 @@
+data/sim_*
+data/*.tmp
+service/.env
+data/orders.db
+service/vapi_tools.json
+data/demo_logs/
