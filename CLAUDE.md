@@ -5,7 +5,8 @@ driving a **single SO-101 follower arm with no leader arm**. On top of it sits `
 teach-and-repeat cell that moves boxes, packs parts from fixed slots, and tracks inventory.
 
 ## Environment
-- `conda activate lerobot` (Python 3.10, `/opt/miniconda3/envs/lerobot`). Installed: `.[feetech]`, `placo` (IK), `mcp` 2.x.
+- `conda activate lerobot` (Python 3.10, `/opt/miniconda3/envs/lerobot`). Installed: `.[feetech]`, `placo` (IK),
+  `mcp` 2.x (`MCPServer`, `from mcp import Client`), `fastapi`/`uvicorn`, `anthropic` 2.x.
 - Arm port: `/dev/cu.usbmodem5CE51213501` (macOS). Check with `ls /dev/cu.*`.
 - Only one process can own the port. `lsof /dev/cu.usbmodem5CE51213501` before running anything, and
   never kill a user's session (e.g. `keys`) — ask them to quit it.
@@ -44,13 +45,42 @@ teach-and-repeat cell that moves boxes, packs parts from fixed slots, and tracks
     checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK, straight-line paths
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test
-  - `service/` order-taking web service (see `packing/service/README.md`)
+  - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
+    `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
+    `vapi.py` (Catalog, parse_items) and `worker.py` (RobotPacker).
+  - `shop/` **current** order stack (see "Shop" below and `packing/shop/README.md`)
   - Config `packing/cell.yaml`; data in `packing/data/` (`poses.json`, `inventory.db`; `--sim` uses `sim_*`).
   - `packing/urdf/` — SO-101 URDF + meshes from TheRobotStudio/SO-ARM100 (`so101_new_calib.urdf`).
 - `packing/remote/` — LLM contingency control over MCP (`python -m packing.remote [--sim]`, mcp 2.x:
   `from mcp.server.mcpserver import MCPServer`). `jog.py` direction commands → checked straight lines;
   `safety.py` RemoteLimits safe box; `cameras.py` OpenCV or sim schematic; `server.py` tools + LLM instructions.
 - CLI: `python -m packing <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|status|events|set-part|set-box|clear-output|pack|move-box> [--sim]`
+
+## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`
+- `python -m packing.shop start [--robot] [--auto]` = one process: FastAPI server on :8000 + MCP tools
+  at `/mcp` + dashboard at `/dashboard` + robot agent thread (simulated packing unless `--robot`).
+  `serve` / `robot` / `chat` run the pieces separately. Only one server can hold :8000 — check
+  `lsof -iTCP:8000` and ask the user to stop theirs; never kill it. Test on a spare port.
+- Flow: ordering agent (Claude Haiku `claude-haiku-5-5`, key from `.env.local` — git-ignored, never
+  print it) uses only the MCP tools `list_products / place_order / check_order / cancel_order`
+  (`tools.py`, replies are short spoken sentences). Web chat (`POST /api/chat`) and terminal chat share
+  `chat.Conversation`.
+- **Manual dispatch is the default**: orders arrive `queued` (shown as "received"); the dashboard's
+  **Action** → `ready`; the robot agent only claims `ready` orders (`--auto` claims `queued`).
+  **Delete** allowed for queued/ready/failed/cancelled. Statuses: queued → ready → packing → packed | failed.
+- **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
+  stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
+  SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.
+  `ShelfSimPacker` consumes real parts so stock stays true. Catalog names: `catalog:` in `cell.yaml`
+  (still placeholder widget/gadget). Tests/live checks must use a temp copy of `cell.yaml` so they don't
+  write the real databases.
+- Robot agent is the only thing that opens the arm; it polls `POST /robot/claim` (returns the in-progress
+  order first → resume), reports `done`/`failed`, and **exits on a packing failure** (human checks arm).
+- Dashboard (`static/dashboard.html`, single file, no deps): status plate (yellow packing / steel idle /
+  red offline-or-failed), chat, shelf, orders with Action/Delete, live activity via SSE
+  (`/api/events/stream`, in-memory `events.EventLog`, last 500, lost on restart). Avoid CSS class names
+  that equal event kinds (`tool/robot/order/chat/error/system`) — they collide with `.events li.<kind>`.
+- Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
 
 ## Conventions
 - Every location `L` = poses `L.above` + `L.at`; between stations go via `travel_pose` (`home`).

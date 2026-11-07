@@ -1,6 +1,7 @@
 """Persistent order queue (SQLite).
 
-queued -> packing -> packed -> calling -> called
+queued -> [ready] -> packing -> packed -> calling -> called
+   ('ready' = actioned by a person; used when packing is started manually, see claim_next(from_status))
                   \\-> failed      \\-> call_failed
 queued -> cancelled
 """
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATUSES = ("queued", "packing", "packed", "calling", "called", "failed", "call_failed", "cancelled")
+STATUSES = ("queued", "ready", "packing", "packed", "calling", "called", "failed", "call_failed", "cancelled")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS orders (
@@ -130,26 +131,27 @@ class OrderStore:
     def queue_position(self, order_id: int) -> int | None:
         """1 = next to be packed. None if not queued."""
         o = self.get(order_id)
-        if not o or o.status != "queued":
+        if not o or o.status not in ("queued", "ready"):
             return None
-        return self.db.execute("SELECT COUNT(*) FROM orders WHERE status='queued' AND id<=?", (order_id,)).fetchone()[0]
+        return self.db.execute("SELECT COUNT(*) FROM orders WHERE status IN ('queued','ready') AND id<=?",
+                               (order_id,)).fetchone()[0]
 
     def reserved(self) -> dict[str, int]:
         """SKU counts in orders not yet packed (queued or packing)."""
         out: dict[str, int] = {}
-        for r in self.db.execute("SELECT items FROM orders WHERE status IN ('queued','packing')"):
+        for r in self.db.execute("SELECT items FROM orders WHERE status IN ('queued','ready','packing')"):
             for sku in json.loads(r["items"]):
                 out[sku] = out.get(sku, 0) + 1
         return out
 
-    def claim_next(self) -> Order | None:
-        """Atomically move the oldest queued order to 'packing'."""
+    def claim_next(self, from_status: str = "queued") -> Order | None:
+        """Atomically move the oldest order in `from_status` ('queued', or 'ready' for manual starts) to 'packing'."""
         with self.lock:
-            r = self.db.execute("SELECT id FROM orders WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+            r = self.db.execute("SELECT id FROM orders WHERE status=? ORDER BY id LIMIT 1", (from_status,)).fetchone()
             if not r:
                 return None
-            self.db.execute("UPDATE orders SET status='packing', updated_at=? WHERE id=? AND status='queued'",
-                            (_now(), r["id"]))
+            self.db.execute("UPDATE orders SET status='packing', updated_at=? WHERE id=? AND status=?",
+                            (_now(), r["id"], from_status))
             return self.get(r["id"])
 
     def update(self, order_id: int, status: str | None = None, **fields) -> Order:
@@ -169,12 +171,36 @@ class OrderStore:
             self.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", (*args, order_id))
         return self.get(order_id)
 
+    def action(self, order_id: int) -> Order:
+        """A person releases a received order to the robot: queued -> ready."""
+        with self.lock:
+            o = self.get(order_id)
+            if not o:
+                raise OrderError(f"No order {order_id}.")
+            if o.status != "queued":
+                raise OrderError(f"Order {order_id} is {o.status}; only received orders can be actioned.")
+            self.db.execute("UPDATE orders SET status='ready', updated_at=? WHERE id=?", (_now(), order_id))
+        return self.get(order_id)
+
+    DELETABLE = ("queued", "ready", "failed", "cancelled")
+
+    def delete(self, order_id: int) -> Order:
+        """Remove an order that isn't being packed or already packed (e.g. a broken test order)."""
+        with self.lock:
+            o = self.get(order_id)
+            if not o:
+                raise OrderError(f"No order {order_id}.")
+            if o.status not in self.DELETABLE:
+                raise OrderError(f"Order {order_id} is {o.status} and can't be deleted.")
+            self.db.execute("DELETE FROM orders WHERE id=?", (order_id,))
+        return o
+
     def cancel(self, order_id: int, phone: str | None = None) -> Order:
         with self.lock:
             o = self.get(order_id)
             if not o or (phone and o.phone != phone):
                 raise OrderError(f"I couldn't find order {order_id}.")
-            if o.status != "queued":
+            if o.status not in ("queued", "ready"):
                 raise OrderError(f"Order {order_id} is already {o.status.replace('_', ' ')} and can't be cancelled.")
             self.db.execute("UPDATE orders SET status='cancelled', updated_at=? WHERE id=?", (_now(), order_id))
         return self.get(order_id)
