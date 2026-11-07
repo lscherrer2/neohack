@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ArmState, CalSession, TrayState } from "../types";
 import type { Avail } from "./CalibrationTab";
 import ConfirmDialog from "./ConfirmDialog";
+import GotoBox from "./GotoBox";
 
 interface Props {
   arm: Avail<ArmState>;
@@ -221,6 +222,10 @@ export default function Panel(p: Props) {
             )}
 
             <FitBox session={s} names={names} />
+
+            {(s.saved || s.fit?.ok) && (
+              <GotoBox arm={p.arm.data} tray={tray} session={s} setTarget={p.setTarget} />
+            )}
 
             {s.active && (
               <div className="cal-actions">

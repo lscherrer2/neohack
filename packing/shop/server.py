@@ -15,6 +15,9 @@
   GET  /dashboard/              React app (packing/shop/web, built into static/app): Orders + Calibration tabs
   GET  /api/arm  /api/arm/stream   live arm state (joints, FK link frames, tip); POST /api/arm/connect|disconnect
   GET  /api/arm/preview[/{name}]  generic poses drawn without an arm (dashboard preview toggle)
+  POST /api/arm/goto            {"point", "confirm_move", "standoff_mm"}: plan (dry run) or move to a tray point,
+                                stand-off out along the tray normal; GET = last move; POST /api/arm/stop halts it
+  POST /api/arm/release         {"confirm_hold": true} motors off again during calibration (after a go-to)
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
@@ -118,6 +121,12 @@ class ConfirmIn(BaseModel):
 
 class CaptureIn(BaseModel):
     pocket: str  # a pocket id or a plate corner id (corner_bl / corner_tl / corner_br / corner_tr)
+
+
+class GotoIn(BaseModel):
+    point: str  # pocket id or plate corner id
+    confirm_move: bool = False  # False = plan only (dry run), True = move
+    standoff_mm: float = Field(12.7, ge=5.0, le=100.0)  # distance out along the tray normal
 
 
 class ModeIn(BaseModel):
@@ -371,6 +380,85 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         events.record("robot", "Arm disconnected")
         return _arm_state()
 
+    # ---------------- go-to preview (moves the arm; plan first, then confirm_move)
+    goto_state: dict = {"runner": None}
+
+    def _runner():
+        if goto_state["runner"] is None:
+            from .goto_runner import GotoRunner
+
+            goto_state["runner"] = GotoRunner(hub, shelf.cfg, events.record)
+        return goto_state["runner"]
+
+    def _goto_calibration():
+        """Live fit while calibrating (if good), else the saved calibration."""
+        sess = _session()
+        if sess.active:
+            cal, err = sess._fit()
+            if cal is not None and err is None:
+                return cal, "live fit"
+        cal = _tray().calibration()
+        if cal is None:
+            raise HTTPException(409, "calibrate the tray first (or capture enough points for a good live fit)")
+        return cal, "saved calibration"
+
+    @app.post("/api/arm/goto")
+    def arm_goto(body: GotoIn):
+        from ..motion.kinematics import PathError
+        from ..tray.goto import plan_goto
+
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; wait for it to finish")
+        if h.model is None:
+            raise HTTPException(503, "kinematics unavailable (placo not installed?)")
+        cal, source = _goto_calibration()
+        layout = _tray().layout()
+        try:
+            xy = layout.point(body.point)
+        except KeyError as e:
+            raise HTTPException(404, f"no pocket or corner {body.point}") from e
+        joints = h.state()["joints"]
+        if not joints:
+            raise HTTPException(409, "no arm reading yet")
+        try:
+            with h._lock:
+                plan = plan_goto(h.model, body.point, cal.to_robot(*xy), cal.normal, joints, standoff_mm=body.standoff_mm)
+        except PathError as e:
+            raise HTTPException(422, f"can't plan that move: {e}") from e
+        out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
+               "started": False}
+        if body.confirm_move:
+            _runner().start(plan)
+            out["started"] = True
+        return out
+
+    @app.get("/api/arm/goto")
+    def arm_goto_state():
+        r = goto_state["runner"]
+        return {"running": bool(r and r.running), "last": r.last if r else None}
+
+    @app.post("/api/arm/stop")
+    def arm_stop():
+        r = goto_state["runner"]
+        return {"stopping": bool(r and r.stop())}
+
+    @app.post("/api/arm/release")
+    def arm_release(body: ConfirmIn):
+        if not body.confirm_hold:
+            raise HTTPException(400, "confirm_hold must be true: hold the arm, the motors turn off")
+        h = _hub()
+        if h.mode != "calibrating":
+            raise HTTPException(409, "motors can only be released here during calibration")
+        try:
+            h.set_torque(False)
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", "Motors OFF again for hand-guided capture")
+        return _arm_state()
+
     @app.get("/api/calibration")
     def calibration_state():
         return _session().to_dict()
@@ -396,6 +484,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         h, sess = _hub(), _session()
         if not sess.active or h.mode != "calibrating":
             raise HTTPException(409, "start calibration first (motors off)")
+        if h.torque:
+            raise HTTPException(409, "motors are on (after a go-to) — turn them off to hand-guide, then capture")
         try:
             sess.layout.point(body.pocket)
         except KeyError as e:

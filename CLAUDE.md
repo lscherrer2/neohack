@@ -94,6 +94,12 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
   (`reference_points`: `aa_1`, `aa_7`, `breadboard_1`, `breadboard_5`). Any pocket/corner can be added as an extra
   point. CLI `tray-calibrate` or the dashboard Calibration tab (Corners/Pockets switch). Sim saves `sim_tray_cal.json`.
+- **Go-to preview** (`tray/goto.py` plan, `shop/goto_runner.py` run; dashboard "Go to point" box, `POST /api/arm/goto`):
+  tip to `standoff_mm` (default 12.7 = ½ in) out along the tray normal from a corner/pocket, tool axis
+  (gripper_frame +z) = inward normal projected into the arm's plane (5-DOF; leftover tilt reported). Free move to
+  60 mm out, then a straight line in. Always dry-run first (`confirm_move: false`) → UI confirm dialog → move;
+  `POST /api/arm/stop` halts. Uses the live fit while calibrating if good, else the saved calibration. Turns the
+  motors on (holding) if they were off; `POST /api/arm/release` turns them off again for more hand-guided capture.
 - 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
   report shows the worst angle per item. Picking from pockets (`Cell`) is **not implemented yet**; nor box/drop spot.
 

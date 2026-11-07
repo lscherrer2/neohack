@@ -55,7 +55,7 @@ class ArmHub:
         self.poll_s, self.stale_after_s, self.clock = poll_s, stale_after_s, clock
         self.arm: Arm | None = None
         self.torque: bool | None = None
-        self.mode = "idle"  # idle | calibrating | packing
+        self.mode = "idle"  # idle | calibrating | packing | moving
         self.error: str | None = None
         self._lock = threading.RLock()  # serializes bus access
         self._borrowed = False
@@ -175,20 +175,21 @@ class ArmHub:
 
     # ---------- packing ----------
     @contextmanager
-    def borrow(self) -> Iterator[Arm]:
-        """Lend the arm to a packer for one order. Raises ArmBusy while calibrating."""
+    def borrow(self, mode: str = "packing", allow: tuple[str, ...] = ("idle",)) -> Iterator[Arm]:
+        """Lend the arm (e.g. to a packer for one order) under `mode`; the previous mode comes back after.
+        Raises ArmBusy unless the current mode is in `allow` (packing is refused while calibrating)."""
         self.connect()
         with self._lock:
-            if self.mode != "idle":
+            if self.mode not in allow:
                 raise ArmBusy(f"arm is {self.mode}")
-            self.mode, self._borrowed = "packing", True
+            previous, self.mode, self._borrowed = self.mode, mode, True
         lent = _Lent(self.arm, lambda j, t: self._update(j, t, self.source))
         lent.torque = bool(self.torque)
         try:
             yield lent
         finally:
             with self._lock:
-                self.mode, self._borrowed = "idle", False
+                self.mode, self._borrowed = previous, False
                 self.torque = lent.torque
 
     # ---------- calibration ----------

@@ -239,3 +239,12 @@ dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
 .seg button.on:disabled { opacity: .75; }
 .mode-note { flex-basis: 100%; margin: 0; font-size: .85rem; color: #7A5A00; background: #FFF1C2;
              padding: 6px 10px; border-radius: 4px; }
+
+.goto { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.goto h3 { margin: 0 0 4px; font: 600 1.05rem var(--sign); }
+.goto-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; margin: 8px 0; }
+.goto-row select, .goto-row input { font: inherit; height: 36px; }
+.goto .standoff { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.goto .standoff input { width: 4.5em; }
+.goto button.stop { background: var(--alarm); color: #fff; border-color: var(--alarm); min-width: 7em; }
+.moving-note { margin: 4px 0; color: var(--ink); font-weight: 600; }

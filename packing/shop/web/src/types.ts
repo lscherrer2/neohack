@@ -120,7 +120,7 @@ export interface ArmState {
   connected: boolean;
   source: "sim" | "real" | "remote" | null;
   torque: boolean | null;
-  mode: "idle" | "calibrating" | "packing";
+  mode: "idle" | "calibrating" | "packing" | "moving";
   stale_s: number | null;
   error: string | null;
   joints: Record<JointName, number> | null;

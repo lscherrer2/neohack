@@ -276,5 +276,88 @@ class CalibrationApiTests(unittest.TestCase):
         self.assertEqual(http.post("/api/arm/connect").status_code, 409)
 
 
+class GotoTests(unittest.TestCase):
+    """Go-to preview: plan to a tray point + stand-off along the normal, run it on a FakeArm, stop it."""
+
+    def setUp(self):
+        from packing.tray.calibration import calibrate
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.cfg = load_config(temp_config(Path(self._tmp.name)))
+        R, t = tilted_pose(40, 0.22)
+        self.cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in CalibrationTests.REFS])
+        self.cal.save(self.cfg.tray.calibration_file)
+        self.arm = FakeArm(gain=0.9)
+        self.hub = ArmHub(lambda: self.arm, "sim", lambda: MODEL, poll_s=0.01)
+        self.hub.connect()
+
+    def tearDown(self):
+        self.hub.mode = "idle"
+        self.hub.close()
+        self._tmp.cleanup()
+
+    def test_plan_reaches_standoff_along_normal(self):
+        from packing.tray.goto import plan_goto
+
+        xy = self.cfg.tray.layout().point("corner_tr")
+        c = self.cal.to_robot(*xy)
+        plan = plan_goto(MODEL, "corner_tr", c, self.cal.normal, dict.fromkeys(MODEL.to_units(np.zeros(5)), 0.0))
+        end = MODEL.fk(plan.path[-1])
+        self.assertAlmostEqual(float((end[:3, 3] - c) @ self.cal.normal) * 1000, 12.7, delta=0.5)
+        self.assertLess(np.linalg.norm(end[:3, 3] - (c + self.cal.normal * 0.0127)) * 1000, 2.0)
+        self.assertLess(plan.tilt_deg, 25)  # as close to the normal as the 5-DOF arm allows
+
+    def test_run_and_stop(self):
+        from packing.shop.goto_runner import GotoRunner
+        from packing.tray.goto import plan_goto
+
+        xy = self.cfg.tray.layout().point("corner_bl")
+        c = self.cal.to_robot(*xy)
+        plan = plan_goto(MODEL, "corner_bl", c, self.cal.normal, self.hub.state()["joints"] or self.arm.read())
+        events = []
+        runner = GotoRunner(self.hub, self.cfg, lambda k, t, **d: events.append(t), sleep=lambda s: None)
+        runner.start(plan)
+        runner.join(10)
+        self.assertEqual(runner.last["status"], "done", runner.last)
+        tip = MODEL.tip(self.arm.read())
+        self.assertLess(np.linalg.norm(tip - (c + self.cal.normal * 0.0127)) * 1000, 3.0)
+        self.assertEqual(self.hub.mode, "idle")
+        # stop: a sleep that presses Stop after a few ticks
+        ticks = [0]
+
+        def sleep(_s):
+            ticks[0] += 1
+            if ticks[0] == 5:
+                runner.stop()
+
+        self.arm.pos = self.arm.target = dict.fromkeys(self.arm.pos, 0.0)
+        runner.sleep = sleep
+        plan2 = plan_goto(MODEL, "corner_tr", self.cal.to_robot(*self.cfg.tray.layout().point("corner_tr")),
+                          self.cal.normal, self.arm.read())
+        runner.start(plan2)
+        runner.join(10)
+        self.assertEqual(runner.last["status"], "stopped")
+        self.assertTrue(any("stopped by the user" in e for e in events))
+
+    def test_api_dry_run_needs_confirm_and_turns_motors_on_when_calibrating(self):
+        shelf = Shelf(self.cfg)
+        http = TestClient(create_server(OrderStore(":memory:"), Catalog(self.cfg.catalog, 1), shelf=shelf, hub=self.hub))
+        self.assertTrue(wait_for(lambda: self.hub.state()["joints"] is not None))
+        r = http.post("/api/arm/goto", json={"point": "corner_tl"}).json()
+        self.assertFalse(r["started"])
+        self.assertEqual(r["calibration"], "saved calibration")
+        self.assertFalse(r["motors_will_turn_on"])
+        self.assertEqual(r["plan"]["standoff_mm"], 12.7)
+        self.assertEqual(http.post("/api/arm/goto", json={"point": "nope"}).status_code, 404)
+        # during calibration the motors are off: the dry run says they'll turn on; capture refuses while on
+        http.post("/api/calibration/start", json={"confirm_hold": True})
+        r = http.post("/api/arm/goto", json={"point": "corner_tl"}).json()
+        self.assertTrue(r["motors_will_turn_on"])
+        self.hub.set_torque(True)
+        self.assertEqual(http.post("/api/calibration/capture", json={"pocket": "corner_bl"}).status_code, 409)
+        self.assertEqual(http.post("/api/arm/release", json={}).status_code, 400)
+        self.assertFalse(http.post("/api/arm/release", json={"confirm_hold": True}).json()["torque"])
+
+
 if __name__ == "__main__":
     unittest.main()
