@@ -42,14 +42,16 @@ gripper:
 motion:
   speed: 30                # units/s (joint range is -100..100)
   approach_speed: 12       # final approach to grasp/release
-  settle_tol: 3            # arrived when every joint is within this (sag comp makes this reachable)
+  settle_tol: 1            # arrived when every joint is within this (sag comp makes this reachable)
   settle_timeout: 3.0
   max_following_error: 20  # stop if a joint lags this much (collision / stall)
   max_step: 25             # library per-command safety cap; must exceed sag_max
   sag_gain: 0.08           # gravity-sag compensation (0 = off)
   sag_max: 15              # max correction, units
-  servo_p: 24              # servo stiffness: 16 = connect default (soft), 32 = factory (stiff); 24 = middle
-  servo_accel: 20          # servo acceleration (connect default 254 = max) — measured best
+  lead_s: 0.077            # velocity feed-forward: servo lag ~0.1 s at P=24, scaled 24/31 for P=31 (Nov 2026)
+  gravity_gain: 3.21       # gravity feed-forward, units/N*m: fit 4.15 at P=24, scaled 24/31 (real arm only; 0 = off)
+  servo_p: 31              # servo stiffness: 16 = connect default, 32 = factory; 31 tracks best (vs 17/24, Nov 2026)
+  servo_accel: 254         # servo acceleration; 254 = max = follow our trajectory (20 doubled tracking lag, Nov 2026)
 
 remote:                    # LLM contingency control: python -m packing.remote (see packing/README.md)
   default_step_cm: 2

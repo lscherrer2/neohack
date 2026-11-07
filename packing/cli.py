@@ -27,7 +27,7 @@ from .config import CellConfig, load_config
 from .hardware.arm import Arm, FakeArm, RealArm
 from .joints import BODY
 from .motion.controller import Motion, MotionError
-from .motion.kinematics import ArmModel, PathError, load_ranges
+from .motion.kinematics import ArmModel, PathError, gravity_feedforward, load_ranges
 from .poses import PoseNotTaughtError, PoseStore
 
 PACKING_DIR = Path(__file__).parent
@@ -363,7 +363,9 @@ def _no_sleep(seconds: float) -> None:
 
 def _build_rig(s: Session, arm: Arm) -> Rig:
     arm.tune(p_gain=s.cfg.motion.servo_p, accel=s.cfg.motion.servo_accel)
-    motion = Motion(arm, s.poses, s.cfg.motion, s.cfg.gripper, sleep=_no_sleep if s.args.sim else time.sleep)
+    gravity = None if s.args.sim else gravity_feedforward(s.cfg.robot_id, s.cfg.motion.gravity_gain)
+    motion = Motion(arm, s.poses, s.cfg.motion, s.cfg.gripper, sleep=_no_sleep if s.args.sim else time.sleep,
+                    gravity=gravity)
     return Rig(arm, motion, Cell(s.cfg, motion, s.inventory))
 
 

@@ -42,7 +42,8 @@ class Motion:
     """Moves the arm between poses with speed limits and safety stops."""
 
     def __init__(self, arm: Arm, poses: PoseStore, cfg: MotionCfg, gripper: GripperCfg,
-                 sleep: Callable[[float], None] = time.sleep, log: Callable[[str], None] = print):
+                 sleep: Callable[[float], None] = time.sleep, log: Callable[[str], None] = print,
+                 gravity: Callable[[Pose], Pose] | None = None):
         self.arm, self.poses, self.cfg, self.gripper = arm, poses, cfg, gripper
         self.sleep, self.log = sleep, log
         self.tick_period = 1.0 / cfg.fps
@@ -53,7 +54,14 @@ class Motion:
         # Sag compensation: an outer integral loop. The servos are proportional-only, so a loaded joint
         # (mainly shoulder_lift) settles short of its target. bias slowly learns that error and is added
         # to the command, so the joint actually arrives. Clamped to +-sag_max units.
+        # It learns ONLY while the body command is standing still (settle / hold / gripper moves): during a
+        # move every joint lags its moving command, and integrating that lag pushed each joint ahead by a
+        # different amount -> overshoot and uncoordinated, flailing-looking motion. During moves it's frozen.
         self.bias = dict.fromkeys(BODY, 0.0)
+        # Gravity feed-forward (real arm): model torque * gain at the COMMANDED pose, added every tick so the
+        # full sag is cancelled during moves too (static friction hides part of it at rest, so `bias` alone
+        # under-learns it and joints sagged ~2 units mid-move). `bias` then only learns what's left.
+        self.gravity = gravity
 
     # ---------- basics ----------
     def read(self) -> Pose:
@@ -69,13 +77,15 @@ class Motion:
         return self.poses.get(target) if isinstance(target, str) else dict(target)
 
     # ---------- the control tick ----------
-    def _tick(self, cmd: Pose, check_joints: list[str]) -> Pose:
+    def _tick(self, cmd: Pose, check_joints: list[str], learn: bool = True) -> Pose:
         """Send `cmd`, return the arm's actual pose. Raises MotionError (after holding) if any of
-        `check_joints` lags `cmd` by more than max_following_error."""
+        `check_joints` lags `cmd` by more than max_following_error. learn=False while the body command is
+        moving (trajectory ticks), so lag isn't mistaken for gravity sag."""
         self.arm.write(self._with_bias(cmd))
         self.cmd = cmd
         actual = self.read()
-        self._learn_sag(cmd, actual)
+        if learn:
+            self._learn_sag(cmd, actual)
         if self.trace is not None:
             self.trace.append((time.monotonic(), dict(cmd), dict(actual)))
         self._check_following_error(cmd, actual, check_joints)
@@ -83,9 +93,19 @@ class Motion:
         return actual
 
     def _with_bias(self, cmd: Pose) -> Pose:
+        """What actually goes to the servos: target + gravity feed-forward + learned sag + velocity feed-forward.
+        The servos trail a moving command by ~lead_s (P-only control), so we aim that far ahead along the
+        command's own velocity; every joint then lands on schedule and multi-joint moves stay in step.
+        Zero when the command stands still (settle/hold), so it never shifts where the arm stops."""
         out = dict(cmd)
+        lead_s, cap = self.cfg.lead_s, self.cfg.lead_max
+        sag = self.gravity(cmd) if self.gravity else dict.fromkeys(BODY, 0.0)
         for joint in BODY:
-            out[joint] = clamp_joint(joint, cmd[joint] + self.bias[joint])
+            lead = 0.0
+            if lead_s > 0:
+                velocity = (cmd[joint] - self.cmd[joint]) / self.tick_period
+                lead = max(-cap, min(cap, velocity * lead_s))
+            out[joint] = clamp_joint(joint, cmd[joint] + self.bias[joint] + lead + sag[joint])
         return out
 
     def _learn_sag(self, cmd: Pose, actual: Pose) -> None:
@@ -133,7 +153,7 @@ class Motion:
         self._next_tick_time = time.monotonic()
         for i in range(1, steps + 1):
             progress = _smoothstep(i / steps)
-            self._tick({j: start[j] + (goal[j] - start[j]) * progress for j in JOINTS}, BODY)
+            self._tick({j: start[j] + (goal[j] - start[j]) * progress for j in JOINTS}, BODY, learn=False)
         self._settle(goal, BODY, self.cfg.settle_tol, name)
 
     def follow(self, path: list[Pose], duration: float, name: str = "path") -> None:
@@ -152,7 +172,7 @@ class Motion:
             k = min(int(position), last - 1)
             frac = position - k
             body = {j: path[k][j] + (path[k + 1][j] - path[k][j]) * frac for j in BODY}
-            self._tick({**self.cmd, **body}, BODY)
+            self._tick({**self.cmd, **body}, BODY, learn=False)
         self._settle({**self.cmd, **path[-1]}, BODY, self.cfg.settle_tol, name)
 
     # ---------- gripper ----------

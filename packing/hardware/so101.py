@@ -42,6 +42,7 @@ REG = {
     "Goal_Position": (42, 2),
     "Lock": (55, 1),
     "Present_Position": (56, 2),
+    "Present_Load": (60, 2),  # sign-magnitude, sign bit 10, 0.1 % of max torque
     "Present_Voltage": (62, 1),
     "Present_Temperature": (63, 1),
     "Maximum_Acceleration": (85, 1),

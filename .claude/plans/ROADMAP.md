@@ -1,6 +1,6 @@
 # Roadmap: state of the world → end goal
 
-Written 2026-11-07 (branch `tray-core`). **End goal:** a customer orders a part (web chat now, phone via Vapi later)
+Written 2026-11-07; updated after merging `tray-core` with the remote `main` (motion/IK accuracy work) into `main`. **End goal:** a customer orders a part (web chat now, phone via Vapi later)
 → the order is queued → the SO-101 picks that part from the calibrated parts tray → puts it in a box → the box is
 handed off → the customer is told it's ready → inventory stays true throughout.
 
@@ -17,25 +17,32 @@ The system is a stack: each layer only works if the ones under it do. Status per
 - ✅ Wrist camera available through `camera/cam_server.py` (user runs it; Claude reads frames over HTTP).
 - 🟡 Safety is software-only: confirm dialogs (`confirm_hold`, `confirm_move`), slow moves, following-error stop,
   Stop button. No physical e-stop.
+- ⚠️ **There is a monitor near the arm.** It was hit during a wide pose sweep (2026-11-07). The height-only
+  clearance check doesn't know about it. Keep test motions in regions already used safely unless the user OKs a
+  wider area, and add it as a keep-out zone once collision awareness exists.
 - 🔴 Packing boxes (`box.step`, 76 × 76 × 77 mm with a grab tab) exist physically but aren't placed / fixtured yet.
 - **Missing:** a physical e-stop or kill switch; decide where boxes live (supply, pack spot, output).
 
 ### 1. Servo driver & joint calibration 🟡
 - ✅ `hardware/so101.py`: registers, sync read/write, units (body −100..100, gripper 0..100), calibration JSON
   mirrored in servo EEPROM.
-- ✅ Tuning: P=24, accel=20, software sag compensation for shoulder lift.
+- ✅ Tuning (from `main`, measured by tracing every `Motion` tick): servo P=31, accel 254, velocity feed-forward
+  (`lead_s` 0.077), gravity feed-forward from URDF masses (`gravity_gain` 3.21, real arm only), sag integral that
+  learns only at rest, `settle_tol` 1. Result: joints in step within ~3 %, lag ~1 unit.
 - 🟡 The calibration center pose was eyeballed. After the kinematics fix, readings with the tip on the table sit
   at +5…+10 mm (good enough to move on).
 - **Missing (optional):** table-touch joint-offset calibration (touch the table at ~8 poses → scipy fit of
   lift/elbow/wrist offsets). Only needed if pick accuracy turns out to be the bottleneck.
 
-### 2. Kinematics (FK / IK) 🟡 → ✅ soon
+### 2. Kinematics (FK / IK) ✅
 - ✅ FK from the official SO-101 URDF. URDF 0° = the `calibrate center` pose (fixed 2026-11-07; it used to be the
   middle of the range, which put the tip 2–4 cm low).
 - ✅ Basic placo IK, validated straight-line paths (`ArmModel.line`), 5-DOF handling (no wrist yaw).
-- 🟡 **Sharper IK is on another branch and will be merged soon.**
-- **Missing:** merge that branch into `tray-core`/`main`, re-run `goto` / go-to previews against it, and check
-  that `tray/goto.py` (which uses `ArmModel.ik` / `line`) still behaves.
+- ✅ **IK/motion accuracy work merged** from the remote `main` (2026-11-07): coordinated moves, the same URDF-zero
+  fix (done on both branches), gravity and velocity feed-forward. The 50 mm IK line stays within ~5 mm, including at
+  45° base rotation. The go-to runner uses the gravity feed-forward on the real arm.
+- **Check next:** re-run a go-to preview on the real arm with the new tuning (P=31, feed-forwards). If more IK work
+  exists on another branch, merge it the same way.
 
 ### 3. World model (where things are) 🟡
 - ✅ **Parts tray:** 33 pockets from `part.dxf` (AA ×7, 9V ×5, piezo ×8, glue ×8, breadboard ×5) plus 4 plate
@@ -127,8 +134,8 @@ The system is a stack: each layer only works if the ones under it do. Status per
 ### Cross-cutting
 - **Tests:** 82 sim tests (`.venv/bin/python -m unittest discover -s packing/tests -t .`). New manipulation code
   needs FakeArm tests first (plan validation, inventory transitions, failure paths), then supervised hardware runs.
-- **Repo:** `tray-core` is pushed, no PR yet. The IK branch is pending. Merge both into `main` before layer 5
-  gets big.
+- **Repo:** `tray-core` and the remote `main` were merged into `main` (2026-11-07). Work on `main` or short
+  feature branches from here. `.zed/settings.json` (editor settings) came in from `main`.
 - **Docs:** `CLAUDE.md` is kept current (rule). Plans: `tray_layout.md` (tray), `arm_viz.md` (dashboard, arm hub,
   API contract), `shop_slim.md` (orders), `packing_cell.md` (cell), this file (order of work).
 
@@ -136,7 +143,7 @@ The system is a stack: each layer only works if the ones under it do. Status per
 
 ## Order of work
 
-1. **Merge the sharp-IK branch** (layer 2) and re-check go-to previews on the real arm.
+1. ~~Merge the IK/motion branch~~ (done 2026-11-07). Re-check a go-to preview on the real arm with the new tuning.
 2. **Pick one item from one pocket and hold it up** (layers 4–5). ← *next incremental step, details below*
 3. Pick → **drop spot** (layer 5): release at a fixed, taught spot; inventory `in_gripper` → packed/dropped.
 4. **Boxes** (layers 3, 5, 6): fixture or calibrate box positions, place the item into a box at the pack station.

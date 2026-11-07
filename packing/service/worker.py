@@ -63,7 +63,10 @@ class RobotPacker:
             raise RuntimeError(f"{len(missing)} cell poses not taught yet")
         with (self.arm_provider() if self.arm_provider else self._own_arm(cfg)) as arm:
             arm.tune(p_gain=cfg.motion.servo_p, accel=cfg.motion.servo_accel)
-            motion = Motion(arm, poses, cfg.motion, cfg.gripper, log=log.info)
+            from ..motion.kinematics import gravity_feedforward
+
+            gravity = None if self.sim_arm else gravity_feedforward(cfg.robot_id, cfg.motion.gravity_gain)
+            motion = Motion(arm, poses, cfg.motion, cfg.gripper, log=log.info, gravity=gravity)
             return Cell(cfg, motion, Inventory(cfg.inventory_db), log=log.info).package_box(order.items)
 
 

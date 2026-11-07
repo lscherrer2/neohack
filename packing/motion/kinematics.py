@@ -4,11 +4,13 @@ Joint-space move (Motion.move_to): every joint interpolates A->B; the gripper ti
 Linear move (this module):        the tip position interpolates A->B in a STRAIGHT LINE (orientation
                                    slerps), IK converts each point on the line back into joint values.
 
-Units: the arm runs in calibrated -100..100 units (0 = middle of each joint's recorded range); the URDF works in
-degrees with 0 = the URDF zero pose = the pose held during `calibrate center` (servo reads HALF_TURN there).
-ArmModel converts with the calibration ranges: deg = (raw - HALF_TURN) * 360 / MAX_RES. The range middles are
-NOT the center pose (the SO-101's joint limits are asymmetric: up to ~9° apart), so the old LeRobot-style
-mapping (0 deg = range middle) put the tip centimeters off. Remaining error = how well the center pose was held.
+Units: the arm runs in calibrated -100..100 units (0 = middle of each joint's RANGE); the URDF works in
+degrees with 0 = the CALIBRATION POSE (upper arm up, forearm forward, wrist straight), which calibration
+made read raw 2047 (HALF_TURN). The two zeros differ wherever the end stops aren't symmetric about the
+calibration pose (elbow: 8.7 deg), so ArmModel converts raw-referenced: deg = (raw - 2047) * 360 / 4095.
+(LeRobot's DEGREES mode uses the range middle instead; that cost us a ~15 deg gripper-pitch error, Nov 2026.)
+Accuracy then depends on how well the calibration pose matched the URDF zero pose. Reversed joints
+(drive_mode 1) flip the sign of the zero offset; units already carry the drive-mode sign.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from ..joints import BODY
 
 URDF = Path(__file__).resolve().parent.parent / "urdf" / "so101_new_calib.urdf"
 MAX_RES = 4095  # servo encoder steps per revolution, minus one
-HALF_TURN = 2047  # raw reading at the calibration center pose (= URDF zero), see tools/calibrate.py
+HALF_TURN = 2047  # raw reading at the calibration pose (= URDF zero), set by calibration
 
 
 class PathError(RuntimeError):
@@ -34,6 +36,16 @@ def load_ranges(robot_id: str) -> dict[str, tuple[int, int, int]]:
 
     cal = load_calibration(robot_id)
     return {j: (cal[j].range_min, cal[j].range_max, cal[j].drive_mode) for j in BODY}
+
+
+def gravity_feedforward(robot_id: str, gain: float):
+    """Callable pose -> per-joint command offset (units) that cancels gravity sag, or None if gain is 0.
+    The servos are P-only, so a joint droops ~ torque / stiffness; measured Nov 2026 along the push path:
+    sag = 4.17 * torque (shoulder_lift, rms residual 0.05 units) and 4.12 * torque (elbow_flex)."""
+    if gain <= 0:
+        return None
+    model = ArmModel(load_ranges(robot_id))
+    return lambda pose: {j: gain * t for j, t in model.gravity_torque(pose).items()}
 
 
 class PlacoKinematics:
@@ -160,6 +172,14 @@ class ArmModel:
     def to_units(self, deg: np.ndarray) -> dict[str, float]:
         """URDF joint angles in degrees -> body-joint pose in calibrated units."""
         return {j: float(v) for j, v in zip(BODY, (np.asarray(deg)[: len(BODY)] - self.zero_deg) / self.scale)}
+
+    # ---------- gravity ----------
+    def gravity_torque(self, pose: dict[str, float]) -> dict[str, float]:
+        """Static gravity torque (N*m) on each body joint at `pose`, from the URDF link masses."""
+        self.kin._set(self.to_deg(pose))
+        self.kin.robot.update_kinematics()
+        g = self.kin.robot.static_gravity_compensation_torques_dict("base_link")
+        return {j: float(g[j]) for j in BODY}
 
     # ---------- kinematics ----------
     def fk(self, pose: dict[str, float]) -> np.ndarray:

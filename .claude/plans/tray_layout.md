@@ -4,7 +4,9 @@ Status (2026-11-07): **tray core + dashboard calibration built** on branch `tray
 calibration math, hand-guided `tray-calibrate` + dashboard Calibration tab (corners mode default), pocket inventory,
 tray API (`/api/tray*`), go-to preview, tests in `packing/tests/test_tray.py` / `test_arm_view.py`.
 **Calibrated on the real arm** 2026-11-07 (plate corners, 2.15 mm RMS, tray tilted 69° from flat; user checked a
-go-to visually). Kinematics fixed the same day: URDF zero = `calibrate center` pose (see CLAUDE.md).
+go-to visually). Kinematics fixed the same day: URDF zero = `calibrate center` pose (see CLAUDE.md). The
+calibration was saved before the P=31 / feed-forward tuning came in from `main`. It's a static, hand-guided fit, so
+it should still hold, but re-check with a go-to and redo it if a corner looks off.
 **Not yet:** picking from pockets (`Cell.pick_tray`, per-type grip width), box handling + drop spot, optional
 table-touch joint-offset calibration (only if tip-on-table readings drift beyond ~±5 mm).
 
