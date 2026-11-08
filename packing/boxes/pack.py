@@ -25,7 +25,7 @@ from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
 from ..motion.program import OpenGripper, ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets, pitched, plan_pocket_pick
 from .geometry import BOX_H, BOX_W, WALL
-from .move import box_pose, down_seeds, plan_box_move
+from .move import box_pose, down_seeds, plan_box_move, rest_move
 
 RIM_CLEAR_MM = 12.0  # jaws (tool point) and the part's underside at least this far above the rim at the release
 DROP_PITCHES_DEG = (0.0, 10.0, 20.0, 30.0, 45.0, 60.0)  # release tool pitch below level, tried in order
@@ -297,6 +297,25 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
         return e.wrap(str(e), steps + list(sub_steps if sub_steps is not None else (e.steps or [])), current)
 
     T_box = box_pose(box, "pack", cfg, model.pan_xy)
+    # between the steps (after the box move, after each part, at the end) the arm folds back to the rest pose
+    # (`cfg.rest()`, taught `sleep`), checked clear of the boxes, the tray and the desk
+    rest = cfg.rest() if hasattr(cfg, "rest") else None
+    from .desk import check_desk_clear
+    from .geometry import box_block
+
+    desk = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
+    around = [*(obstacles or []), box_block(T_box, f"box {box.id}")]
+
+    def to_rest(label: str) -> None:
+        nonlocal pose
+        try:
+            back = rest_move(model, pose, rest, around, desk, label)
+        except PathError as e:
+            raise failed(e, []) from e
+        if back:
+            steps.extend(back)
+            pose = dict(back[-1].pose)
+
     try:
         if box.location != "pack":
             mv = plan_box_move(model, box, box.location, "pack", pose, cfg, obstacles)
@@ -308,6 +327,7 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
         raise failed(e) from e
     steps += b0.steps
     pose = b0.pose
+    to_rest(f"box {box.id} at the pack spot")
     lengths = {t.sku: t.length_mm for t in cfg.tray.types}
     types = {t.sku: t for t in cfg.tray.types}
     items, item_steps = [], []
@@ -334,17 +354,15 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
         steps += pick.steps + b.steps
         item_steps.append({"start": base, "taken": base + len(pick.steps), "end": len(steps)})
         pose = b.pose
+        to_rest(what)
         items.append({"pocket": slot, "sku": pick.sku, "pitch_deg": pick.pitch_deg,
                       "drop_tilt_deg": round(drop.pitch_deg, 1), "drop_roll": round(drop.roll, 1),
                       "drop_roll_change": round(drop.roll_change, 1), "drop_fits_opening": drop.fits_opening})
     try:
-        out = plan_box_move(model, box, "pack", "output", pose, cfg, obstacles)
+        out = plan_box_move(model, box, "pack", "output", pose, cfg, obstacles, rest=rest)
     except PathError as e:
         raise failed(e) from e
     steps += out.steps
-    from .desk import check_desk_clear
-
-    desk = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
     check_desk_clear(model, current, steps, desk, f"order {order.id}")  # picks + drops too, not just box moves
     if not any(isinstance(s, OpenGripper) for s in steps):
         raise AssertionError("no release step")  # can't happen: every drop and box move opens

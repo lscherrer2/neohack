@@ -278,6 +278,13 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
+- **Rest pose between actions** (user, 2026-11-07): `cell.yaml` `rest_pose: sleep` (taught pose; built-in default in
+  `poses.DEFAULTS`; `null` = off; `cfg.rest()`). Box moves (`plan_box_move(rest=)`: straight up 50 mm from in front of
+  the tab, then fold), pick tests (folds back holding the part) and every order step (after the box move in, after
+  each part's drop, at the end after the box move out) end with a free joint move "back to sleep"
+  (`boxes/move.rest_move`: arm checked clear of boxes / tray / desk along the interpolation, else the plan is
+  refused). Go-to checks stay at the point. Order `item_steps[i]["end"]` = that item's "back to sleep" step.
+
 ## Conventions
 - **No confirmation dialogs in the dashboard** (user, 2026-11-07): every button acts on one click — moves (go-to, pick, box move: plan + run), motors off (the arm drops: hold it first), deletes/removes, Empty all. The API still requires `confirm_move` / `confirm_hold`; the UI just sends them. Don't add confirm dialogs back.
 - **Git**: when the user asks to commit/push, commit and push straight to `main` — no feature branch needed (user, 2026-11-07).

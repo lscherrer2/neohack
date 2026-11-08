@@ -8,6 +8,8 @@ robot:
 poses_file: data/poses.json
 inventory_db: data/inventory.db   # or ":memory:" (forgotten when each command exits)
 travel_pose: home          # pose for `python -m packing home` ('home' = taught pose; default all-zero mid-pose)
+rest_pose: sleep           # folded pose the arm returns to between actions: after each box move / pick test and between
+                           # the steps of an order (user, 2026-11-07). Checked clear of boxes / tray / desk. null = off
 
 # Parts tray: pockets are read from the DXF; its pose from `python -m packing tray-calibrate`.
 # Pocket ids are <sku>_<n>, n=1 = row nearest the arm (DXF y=0). Plan: .claude/plans/tray_layout.md

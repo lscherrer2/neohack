@@ -146,6 +146,28 @@ def check_path(model: ArmModel, box: Box, path: list[dict], obstacles: list[Bloc
     return worst
 
 
+def rest_move(model: ArmModel, start: dict, rest: dict | None, obstacles: list[Block], desk, label: str,
+              samples: int = 20) -> list[Step]:
+    """Fold back to the rest pose (e.g. taught `sleep`) — a free joint move, checked along its interpolation: the
+    arm clears every obstacle (boxes, tray) and the desk. [] if there's no rest pose or the arm is already there.
+    Raises PathError."""
+    from ..joints import BODY
+    from ..motion.program import JointMove
+    from .desk import desk_point_error
+
+    if rest is None:
+        return []
+    rest = {j: float(rest[j]) for j in BODY}
+    if max(abs(rest[j] - start[j]) for j in BODY) < 0.5:
+        return []
+    for k in range(samples + 1):
+        q = {j: start[j] + (rest[j] - start[j]) * k / samples for j in BODY}
+        check_arm_clear(model, q, obstacles, f"{label}: back to sleep", k / samples)
+        if desk is not None and (hit := desk_point_error(model, q, desk)):
+            raise PathError(f"{label}: back to sleep — {hit[0]}", hit[1])
+    return [JointMove(rest, None, "back to sleep")]
+
+
 def arm_points(model: ArmModel, q: dict) -> list[np.ndarray]:
     """Points along the arm's center line (link origins + midpoints), shoulder to jaw tip."""
     frames = model.link_frames(q)
@@ -196,8 +218,9 @@ def _level(v: np.ndarray) -> np.ndarray:
 
 
 def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[str, float], cfg,
-                  obstacles: list[Block] | None = None) -> BoxMovePlan:
-    """`obstacles`: 3D blocks of the other boxes / the tray, for the landing and carry checks. The carry goes as
+                  obstacles: list[Block] | None = None, rest: dict | None = None) -> BoxMovePlan:
+    """`rest`: fold back to this pose at the end (`cfg.rest()`, checked clear of the landed box too).
+    `obstacles`: 3D blocks of the other boxes / the tray, for the landing and carry checks. The carry goes as
     low as possible (`carry_mm`); if the swing passes near an obstacle the box goes OVER it — by a higher straight
     lift if that's low, else by arcing up and in toward the swivel, swinging high and arcing back down.
     Raises PathError if any part is unreachable, over a joint limit, too tilted or would collide."""
@@ -416,5 +439,16 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.open_gripper("release the box", open_value)
     b.line_by(-_level(T_dst[:3, 2]) * bc.approach_mm / 1000, bc.line_speed_mm_s, "back out level along the tab",
               orientation_weight=OW)
+    try:
+        if rest is not None:  # the reverse of the approach: straight up from in front of the tab, then fold
+            b.line_by(up * APPROACH_UP_M, bc.line_speed_mm_s, f"straight up {APPROACH_UP_M * 1000:.0f} mm",
+                      orientation_weight=OW)
+        back = rest_move(model, b.pose, rest, [*obstacles, box_block(T_land_box, f"box {box.id}")], desk,
+                         f"moving box {box.id}")
+    except PathError as e:
+        raise e.wrap(str(e), list(b.steps), b.start)
+    if back:
+        b.steps += back
+        b.pose = dict(back[-1].pose)
     check_desk_clear(model, b.start, b.steps, desk, f"moving box {box.id}")  # jaw tips / arm above the desk
     return BoxMovePlan(box.id, src, dst, b.steps, travel, lift_mm, tilt_deg=land_tilt, max_carry_tilt_deg=worst)

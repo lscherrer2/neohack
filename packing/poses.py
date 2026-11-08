@@ -7,7 +7,11 @@ from pathlib import Path
 
 from .joints import BODY
 
-DEFAULTS = {"home": dict.fromkeys(BODY, 0.0)}  # calibration mid-pose
+DEFAULTS = {
+    "home": dict.fromkeys(BODY, 0.0),  # calibration mid-pose
+    # folded up, pointing at the middle: where the arm rests between actions (`rest_pose`); the taught values
+    "sleep": {"shoulder_pan": 0.66, "shoulder_lift": -31.1, "elbow_flex": 97.0, "wrist_flex": -86.06, "wrist_roll": 0.0},
+}
 
 
 class PoseNotTaughtError(KeyError):

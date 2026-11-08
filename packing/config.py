@@ -128,6 +128,7 @@ class CellConfig:
     poses_file: Path
     inventory_db: Path
     travel_pose: str | None  # taught pose `home` / `goto` use (None = all-zero mid pose)
+    rest_pose: str | None = "sleep"  # taught pose the arm folds back to between actions (None = stay put)
     max_items_per_order: int = 10  # items in one order (= one box)
     catalog: dict[str, str] = field(default_factory=dict)  # sku -> spoken product name (voice ordering)
     gripper: GripperCfg = field(default_factory=GripperCfg)
@@ -138,6 +139,14 @@ class CellConfig:
     joint_offsets_file: Path | None = None  # kinematic zero offsets from the desk-touch fit (motion/joint_offsets.py)
     reach_comp: object = None  # motion/reach_comp.ReachComp defaults (cell.yaml `reach_comp:`)
     reach_comp_file: Path | None = None  # the Calibration-tab toggle / height (sim: sim_reach_comp.json)
+
+    def rest(self) -> dict[str, float] | None:
+        """The pose to fold back to between actions (box moves, pick tests, each step of an order), or None."""
+        if not self.rest_pose:
+            return None
+        from .poses import PoseStore
+
+        return PoseStore(self.poses_file).get(self.rest_pose)
 
     def reach_comp_settings(self):
         """Reach compensation as currently set (re-read every call: the dashboard may have just toggled it)."""
@@ -180,6 +189,7 @@ def load_config(path: str | Path) -> CellConfig:
         inventory_db=(Path(":memory:") if raw.get("inventory_db") == ":memory:"
                       else rel(raw.get("inventory_db", "data/inventory.db"))),
         travel_pose=raw.get("travel_pose", "home"),
+        rest_pose=raw.get("rest_pose", "sleep"),
         max_items_per_order=int(raw.get("max_items_per_order", 10)),
         catalog={str(k): str(v) for k, v in (raw.get("catalog") or {}).items()},
         gripper=GripperCfg(**(raw.get("gripper") or {})),

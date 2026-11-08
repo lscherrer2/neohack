@@ -298,6 +298,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("LEFT", r.json()["detail"])
         # dry run, then move it to the pack spot on the fake arm
         r = self.http.post("/api/arm/box-move", json={"box_id": b["id"], "to": "pack"}).json()
+        self.assertEqual(r["plan"]["steps"][-1]["label"], "back to sleep")  # folds back after the move
         self.assertFalse(r["started"])
         self.assertTrue(r["motors_will_turn_on"])
         self.arm.gripper_block = 1.2  # the 2 mm tab plate between the jaws

@@ -74,7 +74,12 @@ class PlanTests(unittest.TestCase):
         drops = [i for i in releases if plan.steps[i].label.startswith("item")]
         self.assertEqual(len(drops), 3)
         self.assert_side_releases(plan, drops, o.items)
-        self.assertEqual(plan.steps[-1].label, "back out level along the tab")  # ends releasing the box at output
+        # ends releasing the box at output, straight up, then folded back to sleep (rest_pose)
+        self.assertEqual([st.label for st in plan.steps[-3:]],
+                         ["back out level along the tab", "straight up 50 mm", "back to sleep"])
+        self.assertEqual(plan.steps[-1].pose, self.cfg.rest())
+        up = next(i for i, st in enumerate(plan.steps) if st.label == "up and away from the box")
+        self.assertEqual(plan.steps[up + 1].label, "back to sleep")  # after the box move in, before the first pick
 
     def assert_side_releases(self, plan, drops, skus):
         """Every release: jaws closing horizontally, the part's center over the opening, jaws + part above the rim."""
@@ -115,7 +120,9 @@ class PlanTests(unittest.TestCase):
         for e in plan.item_steps:  # bookkeeping kept intact: each item's drop ends where the next pick starts
             self.assertLess(e["start"], e["taken"])
             self.assertLess(e["taken"], e["end"])
-        self.assertEqual([e["start"] for e in plan.item_steps[1:]], [e["end"] for e in plan.item_steps[:-1]])
+        # ...then back to sleep between items: the next pick starts right after that one step
+        self.assertTrue(all(plan.steps[e["end"]].label == "back to sleep" for e in plan.item_steps))
+        self.assertEqual([e["start"] for e in plan.item_steps[1:]], [e["end"] + 1 for e in plan.item_steps[:-1]])
 
     def test_drop_pitches(self):
         self.assertEqual(drop_pitches(50, 15.5)[0], 0.0)  # fits level: level first

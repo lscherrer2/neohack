@@ -204,6 +204,7 @@ class PickRunTests(unittest.TestCase):
         self.assertFalse(r["started"])
         self.assertEqual(r["plan"]["sku"], "piezo")
         self.assertEqual([s["step"] for s in r["plan"]["steps"]][:4], ["OpenGripper", "JointMove", "LineMove", "Grip"])
+        self.assertEqual(r["plan"]["steps"][-1]["label"], "back to sleep")  # folds back holding the part
         self.assertEqual(http.post("/api/arm/pick", json={"pocket": "corner_bl"}).status_code, 404)
         self.arm.gripper_block = r["plan"]["open_value"] - 4
         self.assertTrue(http.post("/api/arm/pick", json={"pocket": "piezo_5", "confirm_move": True}).json()["started"])

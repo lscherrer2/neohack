@@ -573,6 +573,11 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         try:
             with h._lock:
                 plan = plan_pocket_pick(h.model, tray, shelf.cfg.gripper, cal, body.pocket, joints)
+                # then fold back to sleep holding the part (checked clear of the boxes / tray / desk)
+                end = next(st.path[-1] if hasattr(st, "path") else st.pose for st in reversed(plan.steps)
+                           if hasattr(st, "path") or isinstance(getattr(st, "pose", None), dict))
+                plan.steps += rest_move(h.model, end, shelf.cfg.rest(), _obstacles(h.model.pan_xy), _desk_plane(),
+                                        f"pick from {body.pocket}")
                 check_desk_clear(h.model, joints, plan.steps, _desk_plane(), f"pick from {body.pocket}")
         except PathError as e:
             raise _plan_failed(f"can't plan that pick: {e}", h, joints, e) from e
@@ -633,7 +638,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     from ..boxes.desk import corrections_mm
     from ..boxes.geometry import mirror
     from ..boxes.geometry import obstacles as box_obstacles
-    from ..boxes.move import box_pose, plan_box_move, too_close
+    from ..boxes.move import box_pose, plan_box_move, rest_move, too_close
     from ..boxes.store import LOCATIONS, BoxError, BoxStore
 
     boxes = BoxStore(store)
@@ -1000,7 +1005,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         pan = _pan_xy()
         try:
             with h._lock:
-                plan = plan_box_move(h.model, b, b.location, body.to, joints, cfg, _obstacles(pan, skip=b.id))
+                plan = plan_box_move(h.model, b, b.location, body.to, joints, cfg, _obstacles(pan, skip=b.id),
+                                     rest=cfg.rest())
         except PathError as e:
             raise _plan_failed(f"can't plan that box move: {e}", h, joints, e) from e
 
