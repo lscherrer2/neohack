@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 
 from packing.boxes.geometry import BOX_H, BOX_W, WALL, box_frame, obstacles
 from packing.boxes.pack import (FIT_MARGIN_MM, MAX_JAW_TILT_DEG, RIM_CLEAR_MM, drop_pitches, part_height_mm,
-                                plan_pack_order, span_mm)
+                                pack_sequence, plan_pack_order, span_mm)
 from packing.boxes.packer import TrayPacker
 from packing.boxes.store import BoxStore
 from packing.config import load_config
@@ -126,7 +126,7 @@ class PlanTests(unittest.TestCase):
         drops = [i for i, s in enumerate(plan.steps) if isinstance(s, OpenGripper) and s.label.startswith("item")
                  and "release" in s.label]
         self.assertEqual(len(drops), 33)
-        self.assert_side_releases(plan, drops, skus)
+        self.assert_side_releases(plan, drops, [it["sku"] for it in plan.items])  # packing order (breadboards first)
         by_sku = {}
         for it in plan.items:
             by_sku.setdefault(it["sku"], []).append(it)
@@ -139,6 +139,14 @@ class PlanTests(unittest.TestCase):
         # ...then back to sleep between items: the next pick starts right after that one step
         self.assertTrue(all(plan.steps[e["end"]].label == "back to sleep" for e in plan.item_steps))
         self.assertEqual([e["start"] for e in plan.item_steps[1:]], [e["end"] + 1 for e in plan.item_steps[:-1]])
+
+    def test_breadboards_before_glue(self):
+        self.assertEqual(pack_sequence(["glue", "aa", "breadboard", "glue", "breadboard"]), [2, 4, 0, 1, 3])
+        self.assertEqual(pack_sequence(["aa", "breadboard", "piezo"]), [0, 1, 2])  # no glue: as ordered
+        self.assertEqual(pack_sequence(["glue", "aa"]), [0, 1])
+        o = order(2, ["glue_3", "breadboard_1"], ["glue", "breadboard"])
+        plan = plan_pack_order(MODEL, self.cfg, self.cal, o, self.box, HOME, obstacles(self.cfg, {}))
+        self.assertEqual([i["pocket"] for i in plan.items], ["breadboard_1", "glue_3"])
 
     def test_drop_pitches(self):
         self.assertEqual(drop_pitches(50, 15.5)[0], 0.0)  # fits level: level first

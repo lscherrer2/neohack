@@ -188,7 +188,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   it, AND the arm: shoulder→jaw points ≥ 1.5 cm; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
   box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;
-  345 fails the box move; 365 and 355 ± 50 y also plan everything), each reserved part picked + released, box → its supply
+  345 fails the box move; 365 and 355 ± 50 y also plan everything), each reserved part picked + released (breadboards before glue sticks when an order has both: `pack.PACK_AFTER`), box → its supply
   spot mirrored right. Tray goes on the LEFT. **Side release** (`pack.plan_drop`): the wrist rolls during the free move
   so the jaws close HORIZONTALLY (tool x level, nothing under the part when they open); tool pointing away from the
   swivel, level (parts longer than the 76 mm opening, e.g. glue: pitched just enough to fit, ~65°, end first); part

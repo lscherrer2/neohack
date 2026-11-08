@@ -274,6 +274,18 @@ def check_clear_of_box(model: ArmModel, steps: list[Step], T_box: np.ndarray, pa
             prev = st.pose
 
 
+# sku -> skus packed before it when both are in the order (user, 2026-11-08: breadboards before glue sticks)
+PACK_AFTER = {"glue": ("breadboard",)}
+
+
+def pack_sequence(skus: list[str]) -> list[int]:
+    """Item indices in packing order: as ordered, except the PACK_AFTER "before" skus (breadboards) go first when
+    the sku they precede (glue) is in the order too. Stable otherwise."""
+    present = set(skus)
+    first = {b for a, bs in PACK_AFTER.items() if a in present for b in bs if b in present}
+    return sorted(range(len(skus)), key=lambda i: skus[i] not in first)
+
+
 def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, float],
                     obstacles: list | None = None) -> PackPlan:
     """`order.slots` = the reserved pocket per item (all must be set). `box` = the order's box (at supply or
@@ -338,7 +350,8 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
     lengths = {t.sku: t.length_mm for t in cfg.tray.types}
     types = {t.sku: t for t in cfg.tray.types}
     items, item_steps = [], []
-    for i, slot in enumerate(order.slots):
+    for i, k in enumerate(pack_sequence(order.items)):  # i = packing position, k = the order's item index
+        slot = order.slots[k]
         what = f"item {i + 1} ({slot})"
         try:
             pick = plan_pocket_pick(model, cfg.tray, cfg.gripper, cal, slot, pose)
