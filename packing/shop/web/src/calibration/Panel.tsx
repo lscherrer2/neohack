@@ -50,7 +50,8 @@ export function ModeSwitch({ mode, busy, onPick }: { mode: CalMode | undefined; 
   );
 }
 
-function ArmStatus({ arm, stale, run, busy }: Pick<Props, "arm" | "stale" | "run" | "busy">) {
+/** Arm connection + status. `compact` (Calibration tab) leaves out the joint values; Controls shows them. */
+export function ArmStatus({ arm, stale, run, busy, compact = false }: Pick<Props, "arm" | "stale" | "run" | "busy"> & { compact?: boolean }) {
   const a = arm.data;
   return (
     <section aria-labelledby="arm-h">
@@ -75,7 +76,7 @@ function ArmStatus({ arm, stale, run, busy }: Pick<Props, "arm" | "stale" | "run
             <p className="sim-note">Simulated arm — this server was started without <code>--robot</code>, so it never
               talks to the real arm. Run <code>python -m packing.shop start --robot</code> to use it.</p>
           )}
-          {a?.joints && (
+          {!compact && a?.joints && (
             <div className="joints">
               <p className="sub">Joint values (units; body −100..100, gripper 0..100)</p>
               <dl className="kv">
@@ -123,7 +124,7 @@ export default function Panel(p: Props) {
         </div>
       )}
 
-      <ArmStatus arm={p.arm} stale={p.stale} run={run} busy={busy} />
+      <ArmStatus arm={p.arm} stale={p.stale} run={run} busy={busy} compact />
 
       <section aria-labelledby="cal-h">
         <header>

@@ -97,7 +97,13 @@ ArmState = {
 - GET  /api/arm/stream         → SSE, `data: <ArmState JSON>` ~10 Hz
 - POST /api/arm/connect        → ArmState; 409 {"detail": msg} if busy / port error
 - POST /api/arm/disconnect     → ArmState (torque stays on; refused while calibrating/packing)
+- POST /api/arm/torque         {"on": bool, "confirm_hold": bool} → ArmState. Controls tab Motors switch: lock
+                                 (hold current pose + gravity FF) / release (needs confirm_hold). Idle only (409 while
+                                 calibrating / moving / packing).
+- POST /api/arm/pick           {"pocket", "confirm_move"} → {"plan", "calibration", "motors_will_turn_on", "started"}
+                                 (Controls tab Procedures; plan in .claude/plans/tray_pick.md)
 - GET  /api/arm/preview        → {"poses": [{"name", "label"}]}; GET /api/arm/preview/{name} → ArmState
+                                 (no longer used by the dashboard since the Controls tab, 2026-11-07)
                                  (source "preview": FK of a generic pose, no arm needed; "home" = calibration center)
 - POST /api/arm/goto {"point", "confirm_move": false, "standoff_mm": 12.7}
                                → {"plan": {point, point_robot_m, standoff_mm, approach_mm, tilt_deg, travel_units,

@@ -5,15 +5,20 @@ import { ApiError } from "./api";
 import Plate from "./Plate";
 import OrdersTab from "./orders/OrdersTab";
 
-// three.js only loads when the Calibration tab is opened.
+// three.js only loads when a tab with the 3D view is opened.
 const CalibrationTab = lazy(() => import("./calibration/CalibrationTab"));
+const ControlsTab = lazy(() => import("./controls/ControlsTab"));
 
-type Tab = "orders" | "calibration";
+type Tab = "orders" | "controls" | "calibration";
 const TABS: { id: Tab; label: string }[] = [
   { id: "orders", label: "Orders" },
+  { id: "controls", label: "Controls" },
   { id: "calibration", label: "Calibration" },
 ];
-const tabFromHash = (): Tab => (window.location.hash === "#calibration" ? "calibration" : "orders");
+const tabFromHash = (): Tab => {
+  const h = window.location.hash.slice(1);
+  return h === "calibration" || h === "controls" ? h : "orders";
+};
 
 export type TrayLoad = { tray: TrayState | null; missing: string | null; reload: () => void };
 
@@ -85,7 +90,7 @@ export default function App() {
         <OrdersTab state={state} refreshState={refreshState} events={events} trayLoad={trayLoad} />
       ) : (
         <Suspense fallback={<main className="loading-tab"><p className="empty">Loading the 3D view…</p></main>}>
-          <CalibrationTab trayLoad={trayLoad} />
+          {tab === "controls" ? <ControlsTab trayLoad={trayLoad} /> : <CalibrationTab trayLoad={trayLoad} />}
         </Suspense>
       )}
     </>

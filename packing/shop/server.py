@@ -18,6 +18,8 @@
   POST /api/arm/goto            {"point", "confirm_move", "standoff_mm"}: plan (dry run) or move to a tray point,
                                 stand-off out along the tray normal; GET = last move; POST /api/arm/stop halts it
   POST /api/arm/release         {"confirm_hold": true} motors off again during calibration (after a go-to)
+  POST /api/arm/torque          {"on": bool, "confirm_hold": bool} lock / release the motors while idle (Controls)
+  POST /api/arm/pick            {"pocket", "confirm_move"} test pick: dry run, then run (same runner/Stop as go-to)
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
@@ -132,6 +134,11 @@ class GotoIn(BaseModel):
 class PickIn(BaseModel):
     pocket: str  # tray pocket id, e.g. aa_1
     confirm_move: bool = False  # False = plan only (dry run), True = move
+
+
+class TorqueIn(BaseModel):
+    on: bool  # True = lock (motors on, hold where it is), False = release (limp)
+    confirm_hold: bool = False  # required to release: the arm drops
 
 
 class ModeIn(BaseModel):
@@ -484,6 +491,25 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     def arm_stop():
         r = goto_state["runner"]
         return {"stopping": bool(r and r.stop())}
+
+    @app.post("/api/arm/torque")
+    def arm_torque(body: TorqueIn):
+        """Controls tab: lock the motors (hold the current pose, with gravity feed-forward) or release them.
+        Only while idle — calibration manages the motors itself, and nothing changes mid-move / mid-pack."""
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.mode != "idle" or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; motors can only be switched while idle"
+                                     + (" (use the Calibration tab)" if h.mode == "calibrating" else ""))
+        if not body.on and not body.confirm_hold:
+            raise HTTPException(400, "confirm_hold must be true: hold the arm, it drops when the motors turn off")
+        try:
+            h.set_torque(body.on)
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", "Motors locked: holding position" if body.on else "Motors released (limp)")
+        return _arm_state()
 
     @app.post("/api/arm/release")
     def arm_release(body: ConfirmIn):

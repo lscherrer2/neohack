@@ -210,5 +210,29 @@ class PickRunTests(unittest.TestCase):
         self.assertEqual(st["last"]["status"], "done", st)
 
 
+class TorqueApiTests(unittest.TestCase):
+    def test_lock_and_release_only_while_idle_and_release_needs_confirm(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cfg = load_config(temp_config(Path(tmp.name)))
+        arm = FakeArm(gain=0.9)
+        hub = ArmHub(lambda: arm, "sim", lambda: MODEL, poll_s=0.01)
+        self.addCleanup(hub.close)
+        http = TestClient(create_server(OrderStore(":memory:"), Catalog(cfg.catalog, 1), shelf=Shelf(cfg), hub=hub))
+        self.assertEqual(http.post("/api/arm/torque", json={"on": True}).status_code, 409)  # not connected
+        hub.connect()
+        self.assertEqual(http.post("/api/arm/torque", json={"on": False}).status_code, 400)  # no confirm_hold
+        self.assertTrue(arm.torque)
+        r = http.post("/api/arm/torque", json={"on": False, "confirm_hold": True})
+        self.assertEqual((r.status_code, r.json()["torque"], arm.torque), (200, False, False))
+        r = http.post("/api/arm/torque", json={"on": True})
+        self.assertEqual((r.json()["torque"], arm.torque), (True, True))
+        hub.mode = "calibrating"
+        r = http.post("/api/arm/torque", json={"on": False, "confirm_hold": True})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("Calibration tab", r.json()["detail"])
+        hub.mode = "idle"
+
+
 if __name__ == "__main__":
     unittest.main()

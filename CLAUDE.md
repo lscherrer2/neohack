@@ -117,7 +117,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
   report shows the worst angle per item.
 - **Pick test** (plan `.claude/plans/tray_pick.md`; `tray/pick.py`, `POST /api/arm/pick {pocket, confirm_move}`,
-  dashboard "Pick test…" in the Go-to box; same runner/Stop as go-to): open → free move to approach point → line in
+  dashboard **Controls** tab → Procedures "Pick…"; same runner/Stop as go-to): open → free move to approach point → line in
   to `grasp_standoff_mm` (0.15 in) off the face (gripper opened only to the part width + `gripper.open_margin_mm`:
   `GripperCfg.open_for`, chord of the jaw swing, `jaw_length_mm` 80 URDF estimate, deg/unit from the calibration;
   part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate; tool point aimed beside
@@ -164,9 +164,13 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - Dashboard = React app (`packing/shop/web/`, served from `static/app/` at `/dashboard/`; old
   `static/dashboard.html` is only a fallback if the build is missing). Tabs: **Orders** (status plate, chat,
   stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via
-  SSE `/api/events/stream`, in-memory `events.EventLog`, last 500) and **Calibration** (3D arm + tray view from
-  `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, joint values,
-  Corners/Pockets switch, capture buttons + extra point, live fit, Save/Finish, "Go to point" preview with Stop).
+  SSE `/api/events/stream`, in-memory `events.EventLog`, last 500), **Controls** (`web/src/controls/`: live 3D arm +
+  tray, arm connect + joint values, **Motors** Locked/Released via `POST /api/arm/torque {on, confirm_hold}` — idle
+  only, release needs the hold confirmation — and **Procedures**: pick from a pocket, dry run → confirm → run, Stop,
+  live step/result from `GET /api/arm/goto`) and **Calibration** (calibration only: 3D view, compact arm status,
+  Corners/Pockets switch, capture buttons + extra point, live fit, Save/Finish, "Check: go to point" with Stop).
+  Both 3D tabs share `web/src/arm/useArmLive.ts`. The old "Preview pose" toggle is gone from the UI
+  (`/api/arm/preview` still exists).
   API contract: `.claude/plans/arm_viz.md`.
   3D arm = stick figure (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Joints are
   projected into the arm's vertical plane (URDF lift/elbow/wrist origins sit 18.3 mm along their axes — fake jogs

@@ -155,12 +155,6 @@ pre { margin: 0; padding: 8px 10px; background: var(--panel); border-radius: 3px
 .dot-live { background: var(--ok); }
 .dot-stale { background: var(--safety); }
 .dot-off { background: var(--alarm); }
-.dot-preview { background: var(--steel); }
-.scene-preview { position: absolute; right: 12px; top: 10px; display: flex; align-items: center; gap: 8px;
-                 padding: 4px 10px; background: rgba(247, 249, 251, .9); border: 1px solid var(--rule);
-                 border-radius: 4px; font-size: .85rem; }
-.scene-preview label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.scene-preview select { font: inherit; }
 .scene-label { font: 600 .78rem var(--text); white-space: nowrap; pointer-events: none; user-select: none;
                padding: 2px 7px; border-radius: 3px; }
 .target-label { background: var(--safety); color: var(--ink); }
@@ -246,5 +240,11 @@ dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
 .goto-row select, .goto-row input { font: inherit; height: 36px; }
 .goto .standoff { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .goto .standoff input { width: 4.5em; }
-.goto button.stop { background: var(--alarm); color: #fff; border-color: var(--alarm); min-width: 7em; }
+.proc-row { grid-template-columns: 1fr auto; }
+.job { margin: 0; padding: 8px 10px; border-left: 3px solid var(--rule); background: var(--panel); }
+.job-running { border-left-color: var(--steel); }
+.job-done { border-left-color: var(--ok); }
+.job-stopped { border-left-color: var(--safety); }
+.job-failed { border-left-color: var(--alarm); }
+.panel button.stop, .goto button.stop { background: var(--alarm); color: #fff; border-color: var(--alarm); min-width: 7em; }
 .moving-note { margin: 4px 0; color: var(--ink); font-weight: 600; }
