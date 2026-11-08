@@ -73,15 +73,21 @@ down_seeds = reach_seeds  # used by the drop / retreat planning (pack.py)
 
 
 def box_pose(box: Box, location: str, cfg, pan_xy: np.ndarray) -> np.ndarray:
-    """4x4 box pose at a location: supply = calibrated, pack = `boxes.pack_spot_mm`, output = supply mirrored."""
+    """4x4 box pose at a location: supply = calibrated, pack = `boxes.pack_spot_mm`, output = supply mirrored.
+    Heights away from the calibrated spot follow the desk plane if one is calibrated (base / desk tilt)."""
+    from .desk import height_at
+
     if location == "supply":
         return box.supply
     if location == "output":
-        return mirror(box.supply, pan_xy)
-    if location == "pack":
-        x, y = cfg.boxes.pack_spot_mm
-        return box_frame((x / 1000, y / 1000), float(box.supply[2, 3]), pan_xy)
-    raise ValueError(location)
+        xy = mirror(box.supply, pan_xy)[:2, 3]
+    elif location == "pack":
+        xy = np.array(cfg.boxes.pack_spot_mm, float) / 1000
+    else:
+        raise ValueError(location)
+    plane = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
+    z = height_at(plane, box.supply[:2, 3], xy, float(box.supply[2, 3]))
+    return box_frame((float(xy[0]), float(xy[1])), z, pan_xy)
 
 
 @dataclass

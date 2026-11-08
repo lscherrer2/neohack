@@ -183,3 +183,7 @@ export interface BoxesState {
   pack_spot_mm: [number, number];
   geometry: { w_m: number; h_m: number; tab_w_m: number; tab_out_m: number };
 }
+
+// ---------- desk plane (GET /api/desk)
+export interface DeskPlaneInfo { a: number; b: number; c: number; points: Vec3[]; rms_mm: number; created: string; tilt_deg: number }
+export interface DeskState { points: Vec3[]; fit: DeskPlaneInfo | null; fit_error: string | null; saved: DeskPlaneInfo | null }

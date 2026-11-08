@@ -142,6 +142,13 @@ class CellConfig:
     motion: MotionCfg = field(default_factory=MotionCfg)
     tray: TrayCfg | None = None
     boxes: BoxesCfg = field(default_factory=BoxesCfg)
+    desk_file: Path | None = None  # desk plane calibration (packing/boxes/desk.py); sim runs use sim_desk_cal.json
+
+    def desk_plane(self):
+        """The saved desk plane, or None (re-read every call: the dashboard may have just saved one)."""
+        from .boxes.desk import DeskPlane
+
+        return DeskPlane.load(self.desk_file) if self.desk_file else None
 
     @property
     def stock_slots(self) -> dict[str, str]:
@@ -188,6 +195,7 @@ def load_config(path: str | Path) -> CellConfig:
         motion=MotionCfg(**(raw.get("motion") or {})),
         tray=_load_tray(raw.get("tray"), rel),
         boxes=_load_boxes(raw.get("boxes")),
+        desk_file=rel((raw.get("desk") or {}).get("calibration_file", "data/desk_cal.json")),
     )
     try:  # jaw degrees per gripper unit from the calibrated range (0..100 spans range_min..range_max)
         from .hardware.so101 import load_calibration

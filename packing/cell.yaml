@@ -70,6 +70,11 @@ boxes:
   jaw_gap_mm: 24           # jaws open this wide (fingertips) to come in on the tab and to let go / back out (2x the
                            # first 12 mm: slack when reaching far out)
 
+# Desk plane (packing/boxes/desk.py): Calibration tab → Desk — motors off, touch the closed jaw tip to the desk at
+# 3+ spots far apart (left, middle, right). Box spots then take their height from it (base / desk tilt).
+desk:
+  calibration_file: data/desk_cal.json
+
 max_items_per_order: 10    # items one order (= one box) may hold
 box_slots:                 # drop spots inside the box *at the pack station*, filled in order;
   - {pose: box_slot_1}     # with fewer spots than items they repeat (item i -> spot i % len). Any sku

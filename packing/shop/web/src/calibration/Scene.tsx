@@ -334,9 +334,9 @@ function LabelProjector({ labels, els }: { labels: Label[]; els: RefObject<Map<s
   return null;
 }
 
-export default function Scene({ arm, stale, tray, session, highlighted, boxes = null, planned = null }: {
+export default function Scene({ arm, stale, tray, session, highlighted, boxes = null, planned = null, deskPoints = [] }: {
   arm: ArmState | null; stale: boolean; tray: TrayState | null; session: CalSession | null; highlighted: string | null;
-  boxes?: BoxesState | null; planned?: PlannedPath | null;
+  boxes?: BoxesState | null; planned?: PlannedPath | null; deskPoints?: Vec3[];
 }) {
   const fitMatrix = session?.active && session.fit?.matrix ? session.fit.matrix : null;
   const trayMatrix = tray ? tray.calibration?.matrix ?? defaultTrayMatrix(tray.outline) : null;
@@ -385,6 +385,12 @@ export default function Scene({ arm, stale, tray, session, highlighted, boxes = 
         {tray && fitMatrix && <FitOutline tray={tray} matrix={fitMatrix} />}
         {boxes && <PackSpot xy={boxes.pack_spot_mm} g={boxes.geometry} />}
         {planned && <PlannedPathView path={planned} />}
+        {deskPoints.map((p, i) => (
+          <mesh key={`desk${i}`} position={p} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.006, 0.006, 0.002, 18]} />
+            <meshStandardMaterial color="#7A5A00" />
+          </mesh>
+        ))}
         {boxes?.boxes.filter((b) => b.pose).map((b) => <BoxMesh key={b.id} box={b} g={boxes.geometry} />)}
         {session?.points.map((pt) => (
           <group key={pt.pocket} position={pt.robot_m}>

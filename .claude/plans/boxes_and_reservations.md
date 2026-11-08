@@ -153,3 +153,10 @@ the joint limit (sim: IK then compromises ~20°). `boxes.fixed_jaw` (bottom | to
 (p − x·2 mm; a first draft had the sign wrong — caught by the test, never ran on the arm). `GET /api/boxes` and the
 box list show `fixed_jaw_calibrated` / `fixed_jaw_used`.
 
+### Change 2026-11-07 (later): wider jaws for boxes; desk plane calibration
+- The plan's heights were identical both ways (left→middle vs middle→left, within 0.05 mm) → the low approach is
+  physical. User: "control issues when it reaches out far" → `boxes.jaw_gap_mm` 24 (2x) on approach + release.
+- Desk plane (user's idea): 3+ touched desk points → plane; box spots' heights follow it relative to the box's
+  calibrated spot (catches a tilted base / uneven desk: 1° over 30 cm ≈ 5 mm). UI: Calibration → Desk; touched
+  points drawn in 3D.
+

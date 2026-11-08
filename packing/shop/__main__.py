@@ -56,6 +56,8 @@ def make_hub(args, cfg, own_arm: bool):
                       gravity_factory=lambda: gravity_feedforward(cfg.robot_id, cfg.motion.gravity_gain))
     if cfg.tray:  # simulated arm: never overwrite the real tray calibration
         cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
+    if cfg.desk_file:  # nor the real desk calibration
+        cfg.desk_file = cfg.desk_file.with_name("sim_" + cfg.desk_file.name)
     return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)
 
 

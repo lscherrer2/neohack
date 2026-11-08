@@ -26,6 +26,9 @@
   DELETE /api/boxes/{id}        remove a box record;  POST /api/boxes/{id}/reset: back to available at supply
   POST /api/arm/box-move        {"box_id", "to": supply|pack|output, "confirm_move"} move a box by its tab
   POST /api/orders/{id}/pack-plan  dry run of packing that order (box in, picks + drops, box out); nothing moves
+  GET  /api/desk                desk plane: touched points, live fit, saved plane
+  POST /api/desk/capture        motors off, jaw tip on the desk: add a point;  DELETE /api/desk/points[/{i}]
+  POST /api/desk/save           fit (3+ points, spread out) + save;  DELETE /api/desk: remove the calibration
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
@@ -716,6 +719,74 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         boxes.update(box_id, location="supply", state="available", order_id=None)
         events.record("robot", f"Box {box_id} back at its supply spot (empty)", box_id=box_id)
         return _boxes_state()
+
+    # ---------------- desk plane (packing/boxes/desk.py): box spot heights follow the real desk
+    from ..boxes.desk import DeskError, DeskPlane, fit_plane
+
+    desk_points: list[list[float]] = []  # touched, not saved yet (in memory)
+
+    def _desk_state() -> dict:
+        cfg = _box_cfg()
+        saved = cfg.desk_plane()
+        fit, err = None, None
+        if desk_points:
+            try:
+                fit = fit_plane(desk_points).to_dict()
+            except DeskError as e:
+                err = str(e)
+        return {"points": desk_points, "fit": fit, "fit_error": err, "saved": saved.to_dict() if saved else None}
+
+    @app.get("/api/desk")
+    def desk_state():
+        return _desk_state()
+
+    @app.post("/api/desk/capture")
+    def desk_capture():
+        """Motors off, closed jaw tip touching the desk: add that point."""
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.torque:
+            raise HTTPException(409, "release the motors first (hold the arm), then touch the desk with the jaw tip")
+        try:
+            tip = h.read_tip()
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        desk_points.append([round(float(v), 5) for v in tip])
+        return _desk_state()
+
+    @app.delete("/api/desk/points")
+    def desk_clear_points():
+        desk_points.clear()
+        return _desk_state()
+
+    @app.delete("/api/desk/points/{index}")
+    def desk_remove_point(index: int):
+        if not 0 <= index < len(desk_points):
+            raise HTTPException(404, f"no point {index}")
+        desk_points.pop(index)
+        return _desk_state()
+
+    @app.post("/api/desk/save")
+    def desk_save():
+        cfg = _box_cfg()
+        try:
+            plane = fit_plane(desk_points)
+        except DeskError as e:
+            raise HTTPException(422, str(e)) from e
+        plane.save(cfg.desk_file)
+        desk_points.clear()
+        events.record("robot", f"Desk calibrated: {len(plane.points)} points, tilt {plane.tilt_deg:.2f}°, "
+                               f"RMS {plane.rms_mm:.1f} mm")
+        return _desk_state()
+
+    @app.delete("/api/desk")
+    def desk_remove():
+        cfg = _box_cfg()
+        if cfg.desk_file and cfg.desk_file.exists():
+            cfg.desk_file.unlink()
+            events.record("robot", "Desk calibration removed (box spots use the calibrated box height again)")
+        return _desk_state()
 
     @app.post("/api/orders/{order_id}/pack-plan")
     def order_pack_plan(order_id: int):
