@@ -190,6 +190,30 @@ class Inventory:
                 added_boxes += 1
         return added_parts, added_boxes
 
+    def set_slot(self, location: str, sku: str, full: bool) -> bool:
+        """A human says what is physically in a slot. full=True: one available `sku` part there (added if
+        missing). full=False: its available part is gone (marked 'missing'). Returns True if anything changed."""
+        part = self.available_part(location)
+        if full and not part:
+            self._tx(
+                [("INSERT INTO parts (sku, location, status, updated_at) VALUES (?, ?, 'available', ?)",
+                  (sku, location, _now()))],
+                ("restock_part", None, None, f"{sku} @ {location}"),
+            )
+            return True
+        if not full and part:
+            self._tx(
+                [("UPDATE parts SET status = 'missing', updated_at = ? WHERE id = ?", (_now(), part.id))],
+                ("slot_emptied", part.id, None, location),
+            )
+            return True
+        return False
+
+    def full_slots(self) -> set[str]:
+        """Locations holding an available part."""
+        rows = self.db.execute("SELECT DISTINCT location FROM parts WHERE status = 'available'")
+        return {row["location"] for row in rows}
+
     # ---------- transitions ----------
     def pick_part(self, part_id: int) -> None:
         """available -> in_gripper."""

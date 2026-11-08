@@ -141,9 +141,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual((s["robot"]["state"], s["robot"]["order"]["id"], s["counts"]), ("packing", 1, {"packing": 1}))
 
     def test_dashboard_page_served(self):
-        r = self.http.get("/dashboard")
+        r = self.http.get("/dashboard", follow_redirects=False)
+        self.assertEqual((r.status_code, r.headers["location"]), (307, "/dashboard/"))
+        r = self.http.get("/dashboard/")
         self.assertEqual(r.status_code, 200)
-        self.assertIn("/api/events/stream", r.text)
+        self.assertIn("/dashboard/assets/", r.text)  # the built React app (packing/shop/web)
 
 
 class ShelfTests(unittest.TestCase):
@@ -157,7 +159,7 @@ class ShelfTests(unittest.TestCase):
         from packing.shop.shelf import Shelf, ShelfSimPacker
 
         tmp = tempfile.TemporaryDirectory()
-        cfg = NS(inventory_db=Path(tmp.name) / "inv.db", part_slots={"a1": "A", "a2": "A", "b1": "B"},
+        cfg = NS(inventory_db=Path(tmp.name) / "inv.db", stock_slots={"a1": "A", "a2": "A", "b1": "B"},
                  box_supply=["in1"])
         shelf = Shelf(cfg)
         self.assertEqual(shelf.available(), {})

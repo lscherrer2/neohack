@@ -9,7 +9,8 @@ degrees with 0 = the CALIBRATION POSE (upper arm up, forearm forward, wrist stra
 made read raw 2047 (HALF_TURN). The two zeros differ wherever the end stops aren't symmetric about the
 calibration pose (elbow: 8.7 deg), so ArmModel converts raw-referenced: deg = (raw - 2047) * 360 / 4095.
 (LeRobot's DEGREES mode uses the range middle instead; that cost us a ~15 deg gripper-pitch error, Nov 2026.)
-Accuracy then depends on how well the calibration pose matched the URDF zero pose.
+Accuracy then depends on how well the calibration pose matched the URDF zero pose. Reversed joints
+(drive_mode 1) flip the sign of the zero offset; units already carry the drive-mode sign.
 """
 
 from __future__ import annotations
@@ -29,12 +30,12 @@ class PathError(RuntimeError):
     """Line can't be followed (unreachable, joint limit, or IK jump)."""
 
 
-def load_ranges(robot_id: str) -> dict[str, tuple[int, int]]:
-    """Calibrated (range_min, range_max) servo ticks of each body joint, from the robot's calibration file."""
+def load_ranges(robot_id: str) -> dict[str, tuple[int, int, int]]:
+    """Calibrated (range_min, range_max, drive_mode) of each body joint, from the robot's calibration file."""
     from ..hardware.so101 import load_calibration
 
     cal = load_calibration(robot_id)
-    return {j: (cal[j].range_min, cal[j].range_max) for j in BODY}
+    return {j: (cal[j].range_min, cal[j].range_max, cal[j].drive_mode) for j in BODY}
 
 
 def gravity_feedforward(robot_id: str, gain: float):
@@ -118,12 +119,16 @@ def _slerp(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
 class ArmModel:
     """SO-101 forward/inverse kinematics in calibrated joint units, plus straight-line path planning."""
 
-    def __init__(self, ranges: dict[str, tuple[int, int]], urdf: Path = URDF):
+    def __init__(self, ranges: dict[str, tuple[int, ...]], urdf: Path = URDF):
+        """ranges: joint -> (range_min, range_max[, drive_mode]) raw servo ticks (see load_ranges)."""
         self.kin = PlacoKinematics(str(urdf), "gripper_frame_link", list(BODY))
-        # degrees per calibrated unit, per joint
-        self.scale = np.array([(ranges[j][1] - ranges[j][0]) / 2 * 360 / MAX_RES / 100 for j in BODY])
-        # degrees at unit 0 (range middle), measured from the calibration pose
-        self.zero_deg = np.array([((ranges[j][0] + ranges[j][1]) / 2 - HALF_TURN) * 360 / MAX_RES for j in BODY])
+        lo = np.array([ranges[j][0] for j in BODY], float)
+        hi = np.array([ranges[j][1] for j in BODY], float)
+        sign = np.array([-1.0 if len(ranges[j]) > 2 and ranges[j][2] else 1.0 for j in BODY])
+        # deg = units * scale + zero_deg: unit 0 is the range middle, URDF 0 is the center pose (HALF_TURN)
+        # units already carry the drive-mode sign (SO101.to_units), so only the zero offset needs it
+        self.scale = (hi - lo) / 2 * 360 / MAX_RES / 100  # degrees per calibrated unit
+        self.zero_deg = sign * ((lo + hi) / 2 - HALF_TURN) * 360 / MAX_RES  # URDF angle at unit 0
 
         # pan axis position (world xy), for azimuth of a point around the base
         self.kin.forward_kinematics(np.zeros(len(BODY)))
@@ -180,6 +185,20 @@ class ArmModel:
     def fk(self, pose: dict[str, float]) -> np.ndarray:
         """4x4 gripper-frame transform for a body-joint pose."""
         return np.array(self.kin.forward_kinematics(self.to_deg(pose)))
+
+    # Links drawn by the dashboard's 3D view, base -> tip.
+    LINKS = ["base_link", "shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link", "gripper_link",
+             "gripper_frame_link", "moving_jaw_so101_v1_link"]
+    GRIPPER_RAD = (-0.174533, 1.74533)  # URDF gripper joint limits; units 0..100 mapped linearly (approximate)
+
+    def link_frames(self, pose: dict[str, float]) -> dict[str, np.ndarray]:
+        """4x4 world transform of every drawn link for `pose` (body joints + optional gripper, units)."""
+        self.kin._set(self.to_deg(pose))
+        if "gripper" in pose:
+            lo, hi = self.GRIPPER_RAD
+            self.kin.robot.set_joint("gripper", lo + (hi - lo) * max(0.0, min(100.0, pose["gripper"])) / 100)
+        self.kin.robot.update_kinematics()
+        return {name: np.array(self.kin.robot.get_T_world_frame(name)) for name in self.LINKS}
 
     def tip(self, pose: dict[str, float]) -> np.ndarray:
         """Gripper tip position in meters (base frame: x forward, y left, z up)."""

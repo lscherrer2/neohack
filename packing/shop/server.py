@@ -6,10 +6,21 @@
   POST /api/orders/{id}/action  release a received order to the robot (queued -> ready)
   DELETE /api/orders/{id}       remove an order that isn't being packed / packed
   POST /api/shelf/restock       after refilling by hand: mark part slots / box spots as full
+  GET  /api/tray                parts tray: pockets (DXF, mm), which are full, calibration (tray -> robot)
+  POST /api/tray/pockets/{id}   {"full": bool}  a human marks one pocket full / empty
+  POST /api/tray/fill           {"full": bool, "sku": optional}  mark every pocket (of one item) full / empty
   POST /robot/orders/{id}/done      {"box_id": "..."}  -> packed
   POST /robot/orders/{id}/failed    {"error": "..."}   -> failed
   GET  /orders  GET /orders/{id}  GET /health
-  GET  /dashboard               live monitoring page (state: /api/state, events: /api/events/stream)
+  GET  /dashboard/              React app (packing/shop/web, built into static/app): Orders + Calibration tabs
+  GET  /api/arm  /api/arm/stream   live arm state (joints, FK link frames, tip); POST /api/arm/connect|disconnect
+  GET  /api/arm/preview[/{name}]  generic poses drawn without an arm (dashboard preview toggle)
+  POST /api/arm/goto            {"point", "confirm_move", "standoff_mm"}: plan (dry run) or move to a tray point,
+                                stand-off out along the tray normal; GET = last move; POST /api/arm/stop halts it
+  POST /api/arm/release         {"confirm_hold": true} motors off again during calibration (after a go-to)
+  /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
+                                save, finish)
+  POST /robot/telemetry         joints from a robot agent running in its own process
 """
 
 from __future__ import annotations
@@ -21,7 +32,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
@@ -32,7 +44,9 @@ from .chat import Conversation, load_api_key
 from .events import EventLog
 from .tools import ShopTools
 
-DASHBOARD = Path(__file__).parent / "static" / "dashboard.html"
+DASHBOARD = Path(__file__).parent / "static" / "dashboard.html"  # old single-file dashboard (fallback)
+APP_DIR = Path(__file__).parent / "static" / "app"  # built React app
+ARM_STREAM_S = 0.1
 ROBOT_ONLINE_S = 5.0  # robot agent polls every ~1 s when idle
 
 INSTRUCTIONS = ("Ordering for a robot packing station. Use list_products to see what's available, confirm the "
@@ -86,6 +100,39 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
 
 
+class PocketIn(BaseModel):
+    full: bool
+
+
+class FillIn(BaseModel):
+    full: bool = True
+    sku: str | None = None
+
+
+class TelemetryIn(BaseModel):
+    joints: dict[str, float]
+    torque: bool = True
+    source: str = "remote"
+
+
+class ConfirmIn(BaseModel):
+    confirm_hold: bool = False
+
+
+class CaptureIn(BaseModel):
+    pocket: str  # a pocket id or a plate corner id (corner_bl / corner_tl / corner_br / corner_tr)
+
+
+class GotoIn(BaseModel):
+    point: str  # pocket id or plate corner id
+    confirm_move: bool = False  # False = plan only (dry run), True = move
+    standoff_mm: float = Field(12.7, ge=5.0, le=100.0)  # distance out along the tray normal
+
+
+class ModeIn(BaseModel):
+    mode: str  # corners | pockets
+
+
 class DoneIn(BaseModel):
     box_id: str | None = None
 
@@ -95,8 +142,9 @@ class FailedIn(BaseModel):
 
 
 def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None = None,
-                  auto_dispatch: bool = False, shelf=None) -> FastAPI:
-    """auto_dispatch=False: the robot only packs orders someone clicked "Action" on."""
+                  auto_dispatch: bool = False, shelf=None, hub=None) -> FastAPI:
+    """auto_dispatch=False: the robot only packs orders someone clicked "Action" on.
+    hub: ArmHub (live arm view + calibration tab); None = no arm in this server."""
     tools = ShopTools(store, catalog)
     events = events or EventLog()
     mcp = build_mcp(tools, events)
@@ -135,6 +183,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     @app.post("/robot/claim")
     def claim():
         events.robot_seen()
+        if hub is not None and hub.mode == "calibrating":
+            return {"order": None}  # motors are off for calibration: no packing until it's finished
         in_progress = store.list("packing", limit=1)
         if in_progress:
             o = in_progress[0]
@@ -197,6 +247,296 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         events.record("order", f"Shelf restocked: {parts} parts and {boxes} boxes added", parts=parts, boxes=boxes)
         return {"parts_added": parts, "boxes_added": boxes}
 
+    # ---------------- parts tray
+    def _tray():
+        tray = getattr(getattr(shelf, "cfg", None), "tray", None)
+        if tray is None:
+            raise HTTPException(404, "no parts tray configured")
+        return tray
+
+    @app.get("/api/tray")
+    def tray_state():
+        from ..tray.calibration import tilt_deg
+        from ..tray.session import corner_label
+
+        tray = _tray()
+        layout, full, cal = tray.layout(), shelf.full_slots(), tray.calibration()
+        pockets = []
+        for p in layout.pockets:
+            d = {"id": p.id, "sku": p.sku, "x": p.x, "y": p.y, "yaw_deg": p.yaw_deg, "shape": p.shape,
+                 "full": p.id in full}
+            if cal:
+                d["robot_m"] = [round(float(v), 5) for v in cal.to_robot(p.x, p.y)]
+            pockets.append(d)
+        return {
+            "outline": layout.outline, "unmatched": layout.unmatched, "protrusion_mm": tray.protrusion_mm,
+            "types": [{"sku": t.sku, "name": t.name, "feature": t.feature, "grip_axis": t.grip_axis} for t in tray.types],
+            "pockets": pockets,
+            "corners": [{"id": cid, "label": corner_label(layout, cid), "x": x, "y": y}
+                        for cid, (x, y) in layout.corners().items()],
+            "calibration": None if cal is None else {
+                "created": cal.created, "rms_mm": cal.rms_mm, "tilt_deg": round(tilt_deg(cal), 1),
+                "matrix": cal.matrix(), "reference_points": [p.pocket for p in cal.points]},
+        }
+
+    @app.post("/api/tray/pockets/{pocket_id}")
+    def set_pocket(pocket_id: str, body: PocketIn):
+        _tray()
+        try:
+            changed = shelf.set_slot(pocket_id, body.full)
+        except KeyError as e:
+            raise HTTPException(404, f"no pocket {pocket_id}") from e
+        if changed:
+            events.record("order", f"Pocket {pocket_id} marked {'full' if body.full else 'empty'}",
+                          pocket=pocket_id, full=body.full)
+        return {"pocket": pocket_id, "full": body.full, "changed": changed}
+
+    @app.post("/api/tray/fill")
+    def fill_tray(body: FillIn):
+        tray = _tray()
+        if body.sku is not None and body.sku not in {t.sku for t in tray.types}:
+            raise HTTPException(404, f"no tray item {body.sku}")
+        n = shelf.set_all(body.full, body.sku, only=set(tray.layout().slots()))
+        what = catalog.products.get(body.sku, body.sku) if body.sku else "all"
+        if n:
+            events.record("order", f"Tray: {n} {what} pockets marked {'full' if body.full else 'empty'}",
+                          sku=body.sku, full=body.full, changed=n)
+        return {"changed": n}
+
+    # ---------------- arm (live 3D view) + tray calibration
+    from ..tray.calibration import CalibrationError
+    from .arm_hub import ArmBusy
+
+    cal_state: dict = {"session": None}
+
+    def _hub():
+        if hub is None:
+            raise HTTPException(503, "no arm in this server")
+        return hub
+
+    def _session():
+        if cal_state["session"] is None:
+            from ..tray.session import CalibrationSession
+
+            cal_state["session"] = CalibrationSession(_tray(), pan_xy=hub.pan_xy if hub else None)
+        return cal_state["session"]
+
+    def _arm_state() -> dict:
+        if hub is None:
+            return {"connected": False, "source": None, "torque": None, "mode": "idle", "stale_s": None,
+                    "error": "no arm in this server", "joints": None, "frames": None, "tip": None}
+        return hub.state()
+
+    @app.post("/robot/telemetry")
+    def telemetry(body: TelemetryIn):
+        if hub is not None:
+            hub.external(body.joints, body.torque, body.source)
+        return {"ok": True}
+
+    @app.get("/api/arm")
+    def arm_state():
+        return _arm_state()
+
+    @app.get("/api/arm/stream")
+    async def arm_stream(request: Request):
+        async def gen():
+            while not await request.is_disconnected():
+                yield f"data: {json.dumps(_arm_state())}\n\n"
+                await asyncio.sleep(ARM_STREAM_S)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/arm/preview")
+    def arm_preview_list():
+        from .arm_hub import PREVIEW_POSES
+
+        return {"poses": [{"name": k, "label": label} for k, (label, _) in PREVIEW_POSES.items()]}
+
+    @app.get("/api/arm/preview/{name}")
+    def arm_preview(name: str):
+        try:
+            return _hub().preview(name)
+        except KeyError as e:
+            raise HTTPException(404, f"no preview pose {name}") from e
+        except ArmBusy as e:
+            raise HTTPException(503, str(e)) from e
+
+    @app.post("/api/arm/connect")
+    def arm_connect():
+        try:
+            _hub().connect()
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", f"Arm connected ({hub.source})")
+        return _arm_state()
+
+    @app.post("/api/arm/disconnect")
+    def arm_disconnect():
+        try:
+            _hub().disconnect()
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", "Arm disconnected")
+        return _arm_state()
+
+    # ---------------- go-to preview (moves the arm; plan first, then confirm_move)
+    goto_state: dict = {"runner": None}
+
+    def _runner():
+        if goto_state["runner"] is None:
+            from .goto_runner import GotoRunner
+
+            goto_state["runner"] = GotoRunner(hub, shelf.cfg, events.record)
+        return goto_state["runner"]
+
+    def _goto_calibration():
+        """Live fit while calibrating (if good), else the saved calibration."""
+        sess = _session()
+        if sess.active:
+            cal, err = sess._fit()
+            if cal is not None and err is None:
+                return cal, "live fit"
+        cal = _tray().calibration()
+        if cal is None:
+            raise HTTPException(409, "calibrate the tray first (or capture enough points for a good live fit)")
+        return cal, "saved calibration"
+
+    @app.post("/api/arm/goto")
+    def arm_goto(body: GotoIn):
+        from ..motion.kinematics import PathError
+        from ..tray.goto import plan_goto
+
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; wait for it to finish")
+        if h.model is None:
+            raise HTTPException(503, "kinematics unavailable (placo not installed?)")
+        cal, source = _goto_calibration()
+        layout = _tray().layout()
+        try:
+            xy = layout.point(body.point)
+        except KeyError as e:
+            raise HTTPException(404, f"no pocket or corner {body.point}") from e
+        joints = h.state()["joints"]
+        if not joints:
+            raise HTTPException(409, "no arm reading yet")
+        try:
+            with h._lock:
+                plan = plan_goto(h.model, body.point, cal.to_robot(*xy), cal.normal, joints, standoff_mm=body.standoff_mm)
+        except PathError as e:
+            raise HTTPException(422, f"can't plan that move: {e}") from e
+        out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
+               "started": False}
+        if body.confirm_move:
+            _runner().start(plan)
+            out["started"] = True
+        return out
+
+    @app.get("/api/arm/goto")
+    def arm_goto_state():
+        r = goto_state["runner"]
+        return {"running": bool(r and r.running), "last": r.last if r else None}
+
+    @app.post("/api/arm/stop")
+    def arm_stop():
+        r = goto_state["runner"]
+        return {"stopping": bool(r and r.stop())}
+
+    @app.post("/api/arm/release")
+    def arm_release(body: ConfirmIn):
+        if not body.confirm_hold:
+            raise HTTPException(400, "confirm_hold must be true: hold the arm, the motors turn off")
+        h = _hub()
+        if h.mode != "calibrating":
+            raise HTTPException(409, "motors can only be released here during calibration")
+        try:
+            h.set_torque(False)
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", "Motors OFF again for hand-guided capture")
+        return _arm_state()
+
+    @app.get("/api/calibration")
+    def calibration_state():
+        return _session().to_dict()
+
+    @app.post("/api/calibration/start")
+    def calibration_start(body: ConfirmIn):
+        if not body.confirm_hold:
+            raise HTTPException(400, "confirm_hold must be true: someone has to hold the arm before the motors turn off")
+        h, sess = _hub(), _session()
+        if h.mode == "packing":
+            raise HTTPException(409, "the arm is packing an order; wait for it to finish")
+        try:
+            h.connect()
+            h.set_torque(False)
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        h.mode, sess.active = "calibrating", True
+        events.record("robot", "Tray calibration started: motors OFF (arm held by hand)")
+        return sess.to_dict()
+
+    @app.post("/api/calibration/capture")
+    def calibration_capture(body: CaptureIn):
+        h, sess = _hub(), _session()
+        if not sess.active or h.mode != "calibrating":
+            raise HTTPException(409, "start calibration first (motors off)")
+        if h.torque:
+            raise HTTPException(409, "motors are on (after a go-to) — turn them off to hand-guide, then capture")
+        try:
+            sess.layout.point(body.pocket)
+        except KeyError as e:
+            raise HTTPException(404, f"no pocket or corner {body.pocket}") from e
+        try:
+            sess.capture(body.pocket, h.read_tip())
+        except ArmBusy as e:
+            raise HTTPException(409, str(e)) from e
+        return sess.to_dict()
+
+    @app.post("/api/calibration/mode")
+    def calibration_mode(body: ModeIn):
+        sess = _session()
+        try:
+            sess.set_mode(body.mode)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return sess.to_dict()
+
+    @app.delete("/api/calibration/points/{pocket_id}")
+    def calibration_delete(pocket_id: str):
+        sess = _session()
+        sess.remove(pocket_id)
+        return sess.to_dict()
+
+    @app.post("/api/calibration/save")
+    def calibration_save():
+        sess = _session()
+        try:
+            cal = sess.save()
+        except CalibrationError as e:
+            raise HTTPException(409, str(e)) from e
+        events.record("robot", f"Tray calibration saved ({cal.rms_mm:.1f} mm RMS, {len(cal.points)} points)",
+                      rms_mm=cal.rms_mm)
+        return sess.to_dict()
+
+    @app.post("/api/calibration/finish")
+    def calibration_finish(body: ConfirmIn):
+        if not body.confirm_hold:
+            raise HTTPException(400, "confirm_hold must be true: hold the arm, the motors turn back on where it is")
+        h, sess = _hub(), _session()
+        if h.mode == "calibrating":
+            try:
+                h.set_torque(True)
+            except ArmBusy as e:
+                raise HTTPException(409, str(e)) from e
+            h.mode = "idle"
+        sess.clear()
+        events.record("robot", "Tray calibration finished: motors ON, holding position")
+        return sess.to_dict()
+
     # ---------------- dashboard
     def robot_state() -> dict:
         seen = events.robot_last_seen
@@ -253,9 +593,16 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         sessions.pop(session_id, None)
         return {"ok": True}
 
-    @app.get("/dashboard", include_in_schema=False)
-    def dashboard():
-        return FileResponse(DASHBOARD)
+    if (APP_DIR / "index.html").exists():
+        @app.get("/dashboard", include_in_schema=False)
+        def dashboard_redirect():
+            return RedirectResponse("/dashboard/")
+
+        app.mount("/dashboard", StaticFiles(directory=APP_DIR, html=True), name="dashboard")
+    else:  # React app not built yet
+        @app.get("/dashboard", include_in_schema=False)
+        def dashboard():
+            return FileResponse(DASHBOARD)
 
     @app.get("/api/state")
     def state():

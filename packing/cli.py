@@ -1,6 +1,7 @@
 """python -m packing <command>   (run from the repo root with .venv: `source .venv/bin/activate`)
 
 Setup:     check | teach NAME... | teach-all [--missing] | poses | goto NAME | home | release
+Tray:      tray | tray-calibrate
 Inventory: restock | status | events | set-part ID STATUS | set-box ID LOCATION [--status S] | clear-output
 Run:       demo [--loops N] | pack [--count N] | move-box BOX_ID LOCATION
 Add --sim to any command to run against a simulated arm (no hardware).
@@ -60,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("home", help="move to the travel/home pose")
     sub.add_parser("release", help="turn motors off (hold the arm!)")
     sub.add_parser("restock", help="after refilling: mark empty part slots / box supply spots as full")
+    sub.add_parser("tray", help="parts tray: pockets from the DXF, calibration status, which pockets are full")
+    sub.add_parser("tray-calibrate", help="motors off: touch the tray reference pockets with the tip, Enter each")
     sub.add_parser("status", help="inventory summary")
     e = sub.add_parser("events", help="recent inventory events")
     e.add_argument("-n", type=int, default=20)
@@ -128,7 +131,7 @@ def cmd_poses(s: Session) -> int:
 
 
 def cmd_restock(s: Session) -> int:
-    parts, boxes = s.inventory.restock(s.cfg.part_slots, s.cfg.box_supply)
+    parts, boxes = s.inventory.restock(s.cfg.stock_slots, s.cfg.box_supply)
     print(f"added {parts} parts, {boxes} boxes")
     print(s.inventory.summary())
     return EXIT_OK
@@ -184,6 +187,58 @@ def cmd_release(s: Session, arm: Arm) -> int:
     input("Hold the arm, then press Enter to turn the motors off...")
     s.release_on_exit = True
     return EXIT_OK
+
+
+def _tray_or_exit(s: Session):
+    if not s.cfg.tray:
+        sys.exit("No `tray:` section in the config.")
+    return s.cfg.tray
+
+
+def _pan_xy(cfg: CellConfig):
+    try:
+        return _load_arm_model(cfg).pan_xy
+    except CellError:
+        return None
+
+
+def cmd_tray(s: Session) -> int:
+    from .tools.tray_calibrate import summarize
+
+    tray = _tray_or_exit(s)
+    layout = tray.layout()
+    full = s.inventory.full_slots()
+    print(f"{tray.dxf.name}: {len(layout.pockets)} pockets")
+    for t in tray.types:
+        ids = [p.id for p in layout.pockets if p.sku == t.sku]
+        marks = "".join("#" if pid in full else "." for pid in ids)
+        print(f"  {t.sku:<11} {t.name:<15} {len(ids):>2}  [{marks}]  ({sum(pid in full for pid in ids)} full)")
+    for u in layout.unmatched:
+        print(f"  unmatched DXF feature: {u}")
+    cal = tray.calibration()
+    if not cal:
+        print("not calibrated: python -m packing tray-calibrate")
+        return EXIT_OK
+    print(f"calibrated {cal.created}")
+    for line in summarize(cal, layout, _pan_xy(s.cfg)):
+        print("  " + line)
+    return EXIT_OK
+
+
+def cmd_tray_calibrate(s: Session, arm: Arm) -> int:
+    from .tools.tray_calibrate import run_tray_calibration
+
+    tray = _tray_or_exit(s)
+    model = _load_arm_model(s.cfg)
+    arm.tune(p_gain=s.cfg.motion.servo_p, accel=s.cfg.motion.servo_accel)  # holds at the end use the real tuning
+    gravity = None if s.args.sim else gravity_feedforward(s.cfg.robot_id, s.cfg.motion.gravity_gain)
+
+    def hold_target(pose):
+        offset = gravity(pose) if gravity else {}
+        return {j: v + offset.get(j, 0.0) for j, v in pose.items()}
+
+    cal = run_tray_calibration(arm, model.tip, tray, s.cfg.catalog, pan_xy=model.pan_xy, hold_target=hold_target)
+    return EXIT_OK if cal else EXIT_STOPPED
 
 
 # ---------- commands that move the arm ----------
@@ -265,11 +320,13 @@ INVENTORY_COMMANDS: dict[str, Callable[[Session], int]] = {
     "set-part": cmd_set_part,
     "set-box": cmd_set_box,
     "clear-output": cmd_clear_output,
+    "tray": cmd_tray,
 }
 ARM_COMMANDS: dict[str, Callable[[Session, Arm], int]] = {
     "teach": cmd_teach,
     "teach-all": cmd_teach,
     "release": cmd_release,
+    "tray-calibrate": cmd_tray_calibrate,
 }
 MOTION_COMMANDS: dict[str, Callable[[Session, Rig], int]] = {
     "home": cmd_home,
@@ -293,6 +350,8 @@ def _open_session(args: argparse.Namespace) -> Session:
         if str(cfg.inventory_db) != ":memory:":
             cfg.inventory_db = cfg.inventory_db.with_name("sim_" + cfg.inventory_db.name)
         cfg.poses_file = cfg.poses_file.with_name("sim_" + cfg.poses_file.name)
+        if cfg.tray:
+            cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
     return Session(args, cfg, PoseStore(cfg.poses_file), Inventory(cfg.inventory_db))
 
 

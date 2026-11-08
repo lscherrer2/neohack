@@ -14,7 +14,13 @@ from ..service.orders import Order
 
 class Shelf:
     def __init__(self, cfg):
-        self.path, self.part_slots, self.box_supply = cfg.inventory_db, cfg.part_slots, cfg.box_supply
+        self.cfg = cfg
+        self.path, self.box_supply = cfg.inventory_db, cfg.box_supply
+
+    @property
+    def slots(self) -> dict[str, str]:
+        """location -> sku for every part slot, tray pockets included."""
+        return self.cfg.stock_slots
 
     def _inv(self) -> Inventory:
         return Inventory(self.path)
@@ -27,7 +33,20 @@ class Shelf:
 
     def restock(self) -> tuple[int, int]:
         """After refilling by hand: one part in every empty part slot, one box on every empty supply spot."""
-        return self._inv().restock(self.part_slots, self.box_supply)
+        return self._inv().restock(self.slots, self.box_supply)
+
+    def full_slots(self) -> set[str]:
+        return self._inv().full_slots() & set(self.slots)
+
+    def set_slot(self, location: str, full: bool) -> bool:
+        """A human marks one slot full/empty. KeyError for an unknown slot."""
+        return self._inv().set_slot(location, self.slots[location], full)
+
+    def set_all(self, full: bool, sku: str | None = None, only: set[str] | None = None) -> int:
+        """Mark every slot (of one sku; within `only` if given) full or empty. Returns how many changed."""
+        inv = self._inv()
+        return sum(inv.set_slot(loc, s, full) for loc, s in self.slots.items()
+                   if sku in (None, s) and (only is None or loc in only))
 
     def consume(self, skus: list[str]) -> None:
         """Mark one available part per SKU as used (simulated packing; the real cell does this itself)."""

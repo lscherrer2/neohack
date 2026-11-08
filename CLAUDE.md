@@ -1,13 +1,20 @@
 # CLAUDE.md
 
+**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, and the order of work).
+
 Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight over the Feetech servo SDK —
 **no LeRobot** (removed Nov 2026; our driver keeps LeRobot's units and calibration format). The project is
-`packing/`: a teach-and-repeat cell that moves boxes, packs parts from fixed slots, and tracks inventory.
+`packing/`: a teach-and-repeat cell that moves boxes, packs parts from a calibrated parts tray (DXF layout), and
+tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orders, live 3D arm, tray calibration) on top.
 
 ## Environment
 - `.venv/` (Python 3.13): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. Deps: `feetech-servo-sdk`
   (`scservo_sdk`), `pyserial`, `numpy`, `pyyaml`, `placo` (IK), `mcp` 2.x (`MCPServer`, `from mcp import Client`),
-  `opencv-python`, `fastapi`/`uvicorn`, `anthropic` 2.x. Run things as `.venv/bin/python -m packing ...`.
+  `opencv-python`, `fastapi`/`uvicorn`, `anthropic` 2.x, `ezdxf` (tray DXF), `scipy` (rigid fit).
+  Run things as `.venv/bin/python -m packing ...`.
+- Frontend (`packing/shop/web/`): Node + npm (Vite, React 19, TS, three / @react-three/fiber / drei).
+  `npm install && npm run build` → `packing/shop/static/app/` (**built output is committed** so Python-only
+  runs work — rebuild and commit it after UI changes). `npm run dev` proxies to `VITE_API_TARGET` (default :8000).
 - Arm port: `/dev/cu.usbmodem5CE51213501` (macOS). Check with `ls /dev/cu.*`.
 - Only one process can own the port. `lsof /dev/cu.usbmodem5CE51213501` before running anything, and
   never kill a user's session (e.g. `keys`) — ask them to quit it.
@@ -35,8 +42,12 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
   `settle_tol: 1`. Result: joints in step within ~3 %, lag ~1 unit, 50 mm IK line within ~5 mm.
 - Directions (Nov 2026): gripper 0 = closed, 100 = open; `elbow_flex` + = forearm down; `wrist_flex` + = gripper
   tips **down** (an early note said "up" — wrong; the model + a 15° pitch observation settle it).
-- Kinematics zero: URDF 0° = the calibration pose = raw 2047, NOT unit 0 (= range middle). Elbow differs by
-  8.7°; using the range middle (as LeRobot does) left the gripper ~15° off level. `ArmModel.zero_deg` handles it.
+- **Kinematics zero** (fixed 2026-11-07, independently on both branches): URDF 0° = the calibration pose = raw
+  2047 (`HALF_TURN`), deg = (raw − 2047)·360/4095, NOT unit 0 (= range middle). The limits are asymmetric (lift 5°,
+  elbow 8.7°, wrist 4° here); the range middle (as LeRobot does) left the gripper ~15° off level and the tip 2–4 cm
+  low. `ArmModel.zero_deg` handles it (drive-mode sign included). With the fix the jaw resting on the table reads
+  z ≈ +5…+10 mm. Remaining error = how well the eyeballed calibration pose was held; a table-touch joint-offset fit
+  is the planned fix if needed. Units / taught poses are unaffected.
 - Workspace: there is a **monitor near the arm** — it was hit during a wide pose sweep (2026-11-07). The
   height-only clearance check doesn't know about it; keep test motions inside regions already used safely
   (home / sleep / horizontal / 50 mm push) unless the user OKs a wider area.
@@ -56,14 +67,21 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
   - `hardware/` `so101.py` Feetech driver (`FeetechBus` registers/sync r/w, `SO101` units + calibration) ·
     `arm.py` Arm protocol, RealArm/FakeArm · `keyboard.py` jog key map + raw-terminal input
   - `motion/` `controller.py` `Motion`: smooth joint moves, `follow()` for paths, settle + following-error
-    checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line paths
+    checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line
+    paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view)
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
+    (servo calibration) · `tray_calibrate.py` hand-guided tray calibration (CLI)
+  - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type + plate
+    corner points · `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard
+    calibration, corners/pockets mode) · `goto.py` go-to preview planner
+  - `hardware/telemetry.py` `TelemetryArm` (publishes joints on read, throttled; `http_publisher` non-blocking)
   - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
     `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
     `vapi.py` (Catalog, parse_items) and `worker.py` (RobotPacker).
   - `shop/` **current** order stack (see "Shop" below and `packing/shop/README.md`)
-  - Config `packing/cell.yaml`; data in `packing/data/` (`poses.json`, `inventory.db`; `--sim` uses `sim_*`).
+  - Config `packing/cell.yaml`; data in `packing/data/` (`poses.json`, `inventory.db`, `tray_cal.json`;
+    `--sim` uses `sim_*`).
   - `packing/urdf/so101_new_calib.urdf` — from TheRobotStudio/SO-ARM100, meshes stripped (kinematics only).
   - `packing/calibration/` — per-arm calibration JSON (committed).
 - `packing/remote/` — LLM contingency control over MCP (`python -m packing.remote [--sim]`, mcp 2.x:
@@ -72,14 +90,35 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
 - `camera/` — wrist camera access (`camera/README.md`). Claude's shell has no macOS camera permission:
   the **user** runs `python camera/cam_server.py`, then fetch frames from `http://127.0.0.1:8765/snap.jpg`
   (check `/info` first). Opens only the "icspring camera" by name — never other cameras.
-- Parts tray (planned, `.claude/plans/tray_layout.md`): `part.dxf` = tray layout (33 pockets: AA, 9V,
-  piezo, glue stick, breadboard), `box.step` = packing box with grab tab (units m). Not implemented yet.
-- CLI: `python -m packing <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|status|events|set-part|set-box|clear-output|pack|move-box> [--sim]`
+- `part.dxf` = parts tray layout (mm); `box.step` = packing box with grab tab (STEP, units m; box handling is TODO).
+- CLI: `python -m packing [--sim] <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|tray|tray-calibrate|status|events|set-part|set-box|clear-output|pack|move-box>`
+  (`--sim` goes **before** the command).
+
+## Parts tray — plan `.claude/plans/tray_layout.md`
+- `tray:` in `cell.yaml`: DXF path, item types (feature circle/rect/pin_pair + size mm, `grip_axis`, name),
+  `reference_points`, protrusion 10 mm, extract ≥120 mm (glue stick length). 33 pockets: `aa_1..7`, `9v_1..5`,
+  `piezo_1..8` (pick point = midpoint of the pin pair), `glue_1..8`, `breadboard_1..5`; `_1` = row nearest the arm.
+- Tray frame = DXF x/y, z out of the face; DXF x runs left→right as seen from the arm. Grip: fingers close along
+  tray x for all but the breadboard (tray y). Catalog names come from the tray types; `part_slots` is empty;
+  one item per order (`box_slots` has one slot). `cfg.stock_slots` = part_slots + tray pockets.
+- Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
+  points → scipy rigid fit, refused above 3 mm RMS. `tray.calibration_mode`: **corners** (default; the middle of each
+  rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
+  (`reference_points`: `aa_1`, `aa_7`, `breadboard_1`, `breadboard_5`). Any pocket/corner can be added as an extra
+  point. CLI `tray-calibrate` or the dashboard Calibration tab (Corners/Pockets switch). Sim saves `sim_tray_cal.json`.
+- **Go-to preview** (`tray/goto.py` plan, `shop/goto_runner.py` run; dashboard "Go to point" box, `POST /api/arm/goto`):
+  tip to `standoff_mm` (default 12.7 = ½ in) out along the tray normal from a corner/pocket, tool axis
+  (gripper_frame +z) = inward normal projected into the arm's plane (5-DOF; leftover tilt reported). Free move to
+  60 mm out, then a straight line in. Always dry-run first (`confirm_move: false`) → UI confirm dialog → move;
+  `POST /api/arm/stop` halts. Uses the live fit while calibrating if good, else the saved calibration. Turns the
+  motors on (holding) if they were off; `POST /api/arm/release` turns them off again for more hand-guided capture.
+- 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
+  report shows the worst angle per item. Picking from pockets (`Cell`) is **not implemented yet**; nor box/drop spot.
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`
 - `python -m packing.shop start [--robot] [--auto]` = one process: FastAPI server on :8000 + MCP tools
-  at `/mcp` + dashboard at `/dashboard` + robot agent thread (simulated packing unless `--robot`).
-  `serve` / `robot` / `chat` run the pieces separately. Only one server can hold :8000 — check
+  at `/mcp` + dashboard at `/dashboard/` + robot agent thread (simulated packing unless `--robot`).
+  `serve [--robot]` / `robot` / `chat` run the pieces separately. Only one server can hold :8000 — check
   `lsof -iTCP:8000` and ask the user to stop theirs; never kill it. Test on a spare port.
 - Flow: ordering agent (Claude Haiku `claude-haiku-5-5`, key from `.env.local` — git-ignored, never
   print it) uses only the MCP tools `list_products / place_order / check_order / cancel_order`
@@ -91,15 +130,33 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.
-  `ShelfSimPacker` consumes real parts so stock stays true. Catalog names: `catalog:` in `cell.yaml`
-  (still placeholder widget/gadget). Tests/live checks must use a temp copy of `cell.yaml` so they don't
-  write the real databases.
-- Robot agent is the only thing that opens the arm; it polls `POST /robot/claim` (returns the in-progress
-  order first → resume), reports `done`/`failed`, and **exits on a packing failure** (human checks arm).
-- Dashboard (`static/dashboard.html`, single file, no deps): status plate (yellow packing / steel idle /
-  red offline-or-failed), chat, shelf, orders with Action/Delete, live activity via SSE
-  (`/api/events/stream`, in-memory `events.EventLog`, last 500, lost on restart). Avoid CSS class names
-  that equal event kinds (`tool/robot/order/chat/error/system`) — they collide with `.events li.<kind>`.
+  `ShelfSimPacker` consumes real parts so stock stays true. Tray pockets are marked full/empty from the dashboard
+  (humans restock; trust that state). Tests/live checks must use a temp copy of `cell.yaml`
+  (`packing.tests.test_tray.temp_config`) so they don't write the real databases / calibration.
+- **Arm ownership**: `shop/arm_hub.py` `ArmHub` owns the arm in the server process (real with `--robot`, FakeArm
+  otherwise; connects on demand, polls ~10 Hz, FK frames). Modes: idle / calibrating / packing / moving (go-to).
+  On connect it applies `servo_p` / `servo_accel` (like every other arm user) and it owns the gravity feed-forward
+  (`hub.gravity`, real arm only): go-to `Motion`s use it, and holds (motors back on, Stop) command
+  `hub.hold_target(pose)` = pose + gravity offset so the arm doesn't sag. New arm users must do the same:
+  `arm.tune(...)` + `Motion(..., gravity=gravity_feedforward(...))` on the real arm.
+  In-process packing borrows it (`RobotPacker(arm_provider=hub.borrow)`); `shop/goto_runner.py` borrows it for
+  go-to moves; a separate `robot --robot` process opens its own arm and posts `/robot/telemetry`. Torque off only
+  after a `confirm_hold` from the UI, motion only after `confirm_move`; `/robot/claim` hands out nothing while
+  calibrating. Restarting the server drops an unsaved calibration session (points live in memory) and leaves the
+  torque as it was (off if calibrating) until Connect.
+- Robot agent polls `POST /robot/claim` (returns the in-progress order first → resume), reports
+  `done`/`failed`, and **exits on a packing failure** (human checks arm).
+- Dashboard = React app (`packing/shop/web/`, served from `static/app/` at `/dashboard/`; old
+  `static/dashboard.html` is only a fallback if the build is missing). Tabs: **Orders** (status plate, chat,
+  stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via
+  SSE `/api/events/stream`, in-memory `events.EventLog`, last 500) and **Calibration** (3D arm + tray view from
+  `/api/arm/stream`, "Preview pose" toggle = generic poses without hardware via `/api/arm/preview`, joint values,
+  Corners/Pockets switch, capture buttons + extra point, live fit, Save/Finish, "Go to point" preview with Stop).
+  API contract: `.claude/plans/arm_viz.md`.
+  3D arm = stick figure (line per segment, arc per joint bend, jaw line) + bright red dot at the tool point. Joints are
+  projected into the arm's vertical plane (URDF lift/elbow/wrist origins sit 18.3 mm along their axes — fake jogs
+  otherwise); the tool point is the true FK position. Avoid CSS class names that equal event kinds
+  (`tool/robot/order/chat/error/system`) — they collide with the activity list styles.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
 
 ## Conventions
@@ -110,3 +167,10 @@ Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight o
 - Joint moves = curved tip path; `{line: X}` / `goto --line` = straight tip path via IK, fully planned
   and validated (reach, joint limits, jumps) before moving.
 - Keep new features testable with `FakeArm` + `--sim`; add tests in `packing/tests/`.
+- **Workspace safety**: mind the monitor next to the arm (see Hardware facts). Go-to / pick previews must stay
+  near the tray and inside regions already used safely.
+- **Keep this file current**: whenever a change affects layout, commands, APIs, config, data files or rules here,
+  update CLAUDE.md (and the plans it points to) in the same change, without being asked.
+- **Prefer a well-fitting library over custom code** for anything complex (math, geometry, file formats,
+  UI). Write it ourselves only if no good library fits, or the library has a real downside (huge, unmaintained,
+  wrong license, poor fit). Add new deps to `requirements.txt`. E.g. DXF via `ezdxf`, rigid fits via `scipy`.

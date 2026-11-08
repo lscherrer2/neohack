@@ -6,16 +6,19 @@ inventory records every pick/place so a stopped run can resume. Design notes: `.
 Run everything from the repo root with the venv active: `source .venv/bin/activate` (setup in the top-level README).
 
 ## 1. Describe the table — `packing/cell.yaml`
-List your part slots (with SKU), box supply spots, the pack station, output spots, and the
-positions inside the box. Each location `L` needs two poses: `L.above` (safe, clear of everything)
-and `L.at` (where the gripper closes/opens).
+List the box supply spots, the pack station, output spots, and the positions inside the box. Each
+location `L` needs two poses: `L.above` (safe, clear of everything) and `L.at` (where the gripper
+closes/opens). Parts come from the **parts tray** (`tray:` section): its 33 pockets are read from
+`part.dxf` and its pose comes from calibration (`tray-calibrate` or the dashboard), so pockets are
+**not** taught. (Single taught `part_slots` still work but are empty by default.) Picking from the tray
+is not implemented yet — see `.claude/plans/tray_layout.md`.
 
 ## 2. Teach the poses
 ```bash
 python -m packing check                    # what still needs teaching
 python -m packing teach-all --missing      # jog with keys, ENTER saves each, ESC skips
 python -m packing teach-all --missing --limp   # or: motors off, move by hand, ENTER saves
-python -m packing goto part_A1.at          # verify a pose
+python -m packing goto box_in_1.at         # verify a pose
 ```
 Keys: q/a pan, w/s shoulder, e/d elbow, r/f wrist_flex, t/g wrist_roll, y/h gripper, +/- step.
 Teach `.above` high enough that moving from `home` to it can't hit anything.
@@ -23,7 +26,10 @@ First, check which gripper value is open/closed (y/h) and set `gripper.open/clos
 
 ## 3. Stock and run
 ```bash
-python -m packing restock      # after physically filling slots / supply spots
+python -m packing restock      # after physically filling slots / tray pockets / supply spots (marks them all full)
+python -m packing tray         # tray pockets (full/empty), calibration status
+python -m packing tray-calibrate   # motors off: touch the tip to the 4 plate corners (tray.calibration_mode), Enter each
+                                   # (the dashboard's Calibration tab does the same, plus a go-to preview)
 python -m packing pack --count 2
 python -m packing status       # what's packed / available / where boxes are
 python -m packing clear-output # after taking finished boxes away
@@ -77,17 +83,25 @@ a simulated arm (uses separate `data/sim_*` files). Tests: `python -m unittest d
 | file | what |
 |---|---|
 | `cli.py` | `python -m packing …` (one handler per command) |
-| `config.py` | cell.yaml → dataclasses |
+| `config.py` | cell.yaml → dataclasses (incl. `tray:` → `TrayCfg`) |
 | `joints.py` | joint names and value limits |
 | `poses.py` | taught poses → `data/poses.json` |
-| `hardware/arm.py` | `Arm` protocol, `RealArm` (SO101Follower) / `FakeArm` |
+| `hardware/so101.py` | Feetech driver: `FeetechBus` (registers, sync read/write), `SO101` (units + calibration) |
+| `hardware/arm.py` | `Arm` protocol, `RealArm` (via `SO101`) / `FakeArm` |
+| `hardware/telemetry.py` | `TelemetryArm`: publishes joints on read (live 3D view) |
 | `hardware/keyboard.py` | jog key map, raw-terminal key reading |
 | `motion/controller.py` | `Motion`: smooth moves, settle + following-error checks, sag compensation, grip with stall detection |
-| `motion/kinematics.py` | URDF + IK, straight-line paths |
-| `cell/inventory.py` | SQLite parts / boxes / event log → `data/inventory.db` |
+| `motion/kinematics.py` | URDF + placo IK, straight-line paths, link frames; URDF 0° = `calibrate center` pose |
+| `cell/inventory.py` | SQLite parts / boxes / event log → `data/inventory.db`; tray pockets marked full/empty |
 | `cell/procedures.py` | `Cell`: pick/place, transfer_box, pack_part, resumable `package_box` |
+| `tray/dxf.py`, `tray/layout.py` | parts tray pockets + plate corners from `part.dxf` (ezdxf) |
+| `tray/calibration.py`, `tray/session.py` | tray → robot rigid fit (scipy) + checks; dashboard calibration session |
+| `tray/goto.py` | go-to preview planner (stand-off along the tray normal) |
 | `tools/teach.py` | teach pendant |
+| `tools/calibrate.py` | servo calibration (`python -m packing.tools.calibrate scan|backup|center|range|restore`) |
+| `tools/tray_calibrate.py` | hand-guided tray calibration (`python -m packing tray-calibrate`) |
 | `tools/demo.py` / `demo_*.yaml` | waypoint demo (curved + straight moves) |
 | `tools/tune.py` | servo tuning test (`python -m packing tune`) |
-| `service/` | order-taking web service (own README) |
-| `cli.py` | `python -m packing …` |
+| `shop/` | current order stack + dashboard + arm hub (own README) |
+| `service/` | first order service, parked (own README) |
+| `remote/` | LLM contingency control over MCP (`python -m packing.remote`) |

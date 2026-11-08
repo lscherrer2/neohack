@@ -6,6 +6,9 @@ numpy
 pyyaml
 # straight-line moves (IK on the URDF)
 placo
+# parts tray: DXF reading + rigid-fit math
+ezdxf
+scipy
 # remote LLM control + cameras
 mcp>=2
 opencv-python
