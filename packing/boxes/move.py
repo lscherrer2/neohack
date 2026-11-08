@@ -32,9 +32,10 @@ from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersec
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
-CARRY_HEIGHTS_MM = (60.0, 100.0, 140.0, 180.0, 220.0)  # tried after `carry_mm` when a carry would hit something
+CARRY_HEIGHTS_MM = tuple(float(h) for h in range(60, 321, 20))  # tried after the first height if a carry hits
+# something; up to ~the level grip's reach (tool ~33 cm up at box distances)
 CLEARANCE = 0.010  # carried box kept this far from other boxes / the tray (m)
-ARM_CLEARANCE = 0.020  # arm links (sampled along their center lines) kept this far from obstacles (m)
+ARM_CLEARANCE = 0.015  # arm links (sampled along their center lines) kept this far from obstacles (m)
 OVER_MARGIN = 0.04  # a carry whose box passes within this of an obstacle's outline on the desk goes OVER it
 OVER_CLEAR = 0.03  # ...with the box bottom this far above the obstacle's top
 ARM_CHAIN = ["upper_arm_link", "lower_arm_link", "wrist_link", "gripper_link", "gripper_frame_link",
@@ -142,20 +143,20 @@ def check_arm_clear(model: ArmModel, q: dict, obstacles: list[Block], what: str,
 
 
 def over_height_mm(model: ArmModel, box: Box, a: dict, b: dict, z_box_bottom: float, obstacles: list[Block],
-                   samples: int = 30) -> float:
+                   samples: int = 30) -> tuple[float, str | None, float]:
     """Lift (mm above the grasp) needed so the box goes OVER every obstacle whose desk outline the carry from a to
     b passes within OVER_MARGIN of (box bottom ≥ its top + OVER_CLEAR). 0 if it passes nothing."""
     tool_in_box_inv = np.linalg.inv(box.tool_in_box)
-    need = 0.0
+    need, what, what_top = 0.0, None, 0.0
     outlines = [(ob, block_footprint(ob), block_top(ob)) for ob in obstacles]
     for i in range(samples + 1):
         s = i / samples
         T_box = model.fk({j: a[j] + (b[j] - a[j]) * s for j in a}) @ tool_in_box_inv
         fp = footprint(T_box, margin=OVER_MARGIN)
         for ob, outline, top in outlines:
-            if overlaps(fp, outline):
-                need = max(need, top + OVER_CLEAR - z_box_bottom)
-    return need * 1000
+            if overlaps(fp, outline) and top + OVER_CLEAR - z_box_bottom > need:
+                need, what, what_top = top + OVER_CLEAR - z_box_bottom, ob.name, top
+    return need * 1000, what, what_top * 1000
 
 
 def too_close(T_box: np.ndarray, pan_xy: np.ndarray, cfg) -> str | None:
@@ -211,13 +212,13 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     gripped = b.mark()
     # go OVER anything the carry passes near (tray, other boxes): estimate the swing at the lowest lift, then
     # start from the height that clears those obstacles' tops
-    over = 0.0
+    over, over_what, over_top = 0.0, None, 0.0
     try:
         probe = b.line_by(up * bc.carry_mm / 1000, bc.line_speed_mm_s, "probe", orientation_weight=OW)
         dst_low = T_dst[:3, 3] + up * bc.carry_mm / 1000
         _, poses = best_targets(model, ik, dst_low, T_dst[:3, 2], T_dst[:3, 0], [b.pose, *reach_seeds(model, dst_low)])
         z_bottom = float(box_pose(box, src, cfg, pan_xy)[2, 3])  # box bottom at the grasp (on the desk)
-        over = over_height_mm(model, box, probe.path[-1], poses[0], z_bottom, obstacles)
+        over, over_what, over_top = over_height_mm(model, box, probe.path[-1], poses[0], z_bottom, obstacles)
     except PathError:
         pass
     b.reset(gripped)
@@ -241,7 +242,10 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
         except PathError as e:
             errors.append(e.wrap(f"{lift_mm:.0f} mm: {e}", e.steps or list(b.steps), b.start))
     else:  # every height's reason; the path/point shown are the lowest attempt's (usually the real cause)
-        raise errors[0].wrap("no carry height works — " + "; ".join(str(e) for e in errors))
+        why = (f"to go over {over_what} (top {over_top:.0f} mm above the desk) box {box.id} has to be lifted "
+               f"≥ {over:.0f} mm, and no lift from there up to {heights[-1]:.0f} mm works" if over_what
+               else "no carry height works")
+        raise errors[0].wrap(f"{why} — " + "; ".join(str(e) for e in errors[:4]) + (" …" if len(errors) > 4 else ""))
     land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {lift_mm:.0f} mm to the table (same height as picked)",
                      orientation_weight=OW)
     land_tilt = box_tilt_deg(model.fk(land.path[-1]), box.tool_in_box)

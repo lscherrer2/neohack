@@ -115,9 +115,11 @@ class PickPlanTests(unittest.TestCase):
                 off = np.degrees(np.arccos(min(1.0, abs(float(jaw @ want)))))
                 self.assertAlmostEqual(off, plan.jaw_off_deg, delta=0.5)
                 self.assertLess(off, 16 if pk.sku != "breadboard" else plan.tilt_deg + 5)  # real cell: ≤15.5°
-                # pull: straight out along the normal, at least extract_mm, orientation held
+                # pull: straight out along the normal, at least enough to clear the part's socket, orientation held
                 p_end = MODEL.tip(pull.path[-1])
-                self.assertGreaterEqual(plan.pull_mm, t.extract_mm)
+                typ = next(x for x in t.types if x.sku == pk.sku)
+                self.assertGreaterEqual(plan.pull_mm, typ.length_mm - t.protrusion_mm + 10 - 1e-6)
+                self.assertLessEqual(plan.pull_mm, t.pull_mm)
                 np.testing.assert_allclose(p_end, g + n * plan.pull_mm / 1000, atol=0.002)
                 for pose in pull.path[:: max(1, len(pull.path) // 5)]:
                     off = p_end - MODEL.tip(pose)

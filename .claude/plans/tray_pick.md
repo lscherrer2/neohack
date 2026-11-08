@@ -81,3 +81,11 @@ a `fingertip` frame) and recalibrate the tray; then grasp_standoff = real tip cl
 3. Optional per-type `pull_mm` (part length) → less pitch and twist for short parts.
 4. Drop spot / box place (TBD), then `Cell.pick_tray(sku)` with inventory transitions (pocket → in_gripper →
    box) and `RobotPacker` using it.
+
+### Change 2026-11-07 (later): per-part pull-out, 4 mm tolerance
+"no tool pitch up to 40° fits a 120 mm pull-out from 9v_…": every part had to pull 120 mm (the glue stick's need).
+Now per part: needed = (length_mm − protrusion) + 10 mm (it can't sit deeper than that), preferred = needed + 40,
+max `pull_mm` 150: AA 50/90, 9V 48/88, piezo 15/55, glue 120/150, breadboard 40/80 (min/preferred). `extract_mm`
+is no longer used. Planning tolerance 4 mm / 6-unit line steps (user: a few mm of play). Sim, tray on the left:
+33/33 at 33 cm out; at 28–30 cm the lowest 3–4 glue-stick rows can't make their 120 mm pull (reach).
+

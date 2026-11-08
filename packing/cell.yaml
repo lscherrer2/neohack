@@ -25,11 +25,12 @@ tray:
   dxf: ../part.dxf
   calibration_file: data/tray_cal.json
   protrusion_mm: 10        # every item sticks out this far above the tray face
-  extract_mm: 120          # pull straight out at least this far (glue stick length)
+  extract_mm: 120          # (not used by picks any more: the pull-out is per part, see pull_mm below)
   approach_mm: 30
   # picking (packing/tray/pick.py): approach along the normal, grip, pull straight out, lift
   grasp_standoff_mm: 3.81  # 0.15 in: gripper tip this far off the tray face when it closes
-  pull_mm: 150             # straight pull-out along the normal (falls back to extract_mm if out of reach)
+  pull_mm: 150             # MAX straight pull-out along the normal. Per part: needs (length_mm − protrusion) + 10 mm
+                           # to clear its socket, prefers up to 40 mm more where it fits
   lift_mm: 100             # then straight up (drop spot: TBD)
   max_pitch_deg: 40        # tool may pitch down this much so the pull fits (smallest pitch that fits wins)
   pitch_step_deg: 10

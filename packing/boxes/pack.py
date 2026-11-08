@@ -18,7 +18,7 @@ from typing import Callable
 
 import numpy as np
 
-from ..motion.kinematics import ArmModel, PathError
+from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
 from ..motion.program import OpenGripper, ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets, plan_pocket_pick
 from .geometry import BOX_H, BOX_W, WALL
@@ -78,7 +78,7 @@ def plan_drop(model: ArmModel, b: ProgramBuilder, T_box: np.ndarray, length_mm: 
                       max(top + RIM_CLEAR_MM / 1000, floor + DROP_ABOVE_FLOOR_MM / 1000 - zt[2] * L)])
     targets, poses = best_targets(model, ik, p, down, any_dir, [q, *down_seeds(model, p)])
     T = model.fk(poses[0])
-    if np.linalg.norm(T[:3, 3] - p) > 0.002:
+    if np.linalg.norm(T[:3, 3] - p) > POSITION_TOL_M:
         raise PathError(f"{label}: can't reach the drop point over the box ({np.round(p * 1000, 1)} mm)", p,
                         list(b.steps), b.start)
     zt = T[:3, 2]

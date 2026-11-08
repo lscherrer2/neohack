@@ -18,10 +18,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..joints import BODY
-from ..motion.kinematics import ArmModel, PathError
+from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
 
 INCH_MM = 25.4
-MAX_IK_ERR_M = 0.002
+MAX_IK_ERR_M = POSITION_TOL_M  # see motion/kinematics.py
 JOINT_LIMIT = 100.0
 LINE_SPEED_MM_S = 20.0  # straight line in, slow
 

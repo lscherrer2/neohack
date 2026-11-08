@@ -26,6 +26,11 @@ MAX_RES = 4095  # servo encoder steps per revolution, minus one
 HALF_TURN = 2047  # raw reading at the calibration pose (= URDF zero), set by calibration
 
 
+# Planning tolerances (user, 2026-11-07: "there's a bit of play, a few mm either way — focus on reliable picks").
+POSITION_TOL_M = 0.004  # a planned point counts as reached if the IK lands within this
+MAX_JOINT_STEP = 6.0  # straight lines: largest joint change (units) between dense steps before calling it a flip
+
+
 class PathError(RuntimeError):
     """A motion can't be planned (unreachable, joint limit, IK jump, collision ...).
 
@@ -240,7 +245,7 @@ class ArmModel:
 
     # ---------- straight lines ----------
     def line(self, start: dict[str, float], end: dict[str, float] | np.ndarray, step_m: float = 0.003,
-             keep_orientation: bool = False, max_err_m: float = 0.002, max_joint_step: float = 4.0,
+             keep_orientation: bool = False, max_err_m: float = POSITION_TOL_M, max_joint_step: float = MAX_JOINT_STEP,
              limit: float = 100.0, end_local_rot: np.ndarray | None = None, step_rad: float = 0.02,
              orientation_weight: float = 0.05) -> list[dict[str, float]]:
         """Joint poses whose tips lie on the straight line start-tip -> end.

@@ -13,7 +13,7 @@ Tool orientation: the jaws close along gripper_frame x, so tool x = the grip dir
 points into the tray. The tray faces the arm, so pulling straight out heads back toward the base and a level
 tool runs out of elbow travel (~4-10 cm short of 12 cm). Pitching the tool down lets the wrist take up the fold:
 the planner tries pitch 0°, step, 2·step, … max and uses the smallest pitch that fits `pull_mm`, falling back to
-`extract_mm` (the minimum: longest part). The orientation is held during the pull, so the part still comes out
+the part's minimum (what clears its socket: length − protrusion + 10 mm; see PickSettings.for_type). The orientation is held during the pull, so the part still comes out
 straight along the normal. `tilt_deg` = achieved angle between the tool axis and the inward normal.
 """
 
@@ -52,7 +52,7 @@ class PickSettings:
     approach_mm: float = 30.0  # approach point = protrusion + this, out from the face
     grasp_standoff_mm: float = 3.81  # tool tip off the tray face when it closes (0.15 in)
     pull_mm: float = 150.0  # preferred straight pull-out
-    extract_mm: float = 120.0  # minimum straight pull-out (longest part)
+    extract_mm: float = 120.0  # minimum straight pull-out (per part: clears its socket)
     lift_mm: float = 100.0  # then straight up this far (shortened if out of reach, min 1/3)
     max_pitch_deg: float = 40.0
     pitch_step_deg: float = 10.0
@@ -67,9 +67,21 @@ class PickSettings:
                    grip_mm=t.grip_width_mm, open_value=round(gripper_cfg.open_for(t.grip_width_mm), 1),
                    fixed_jaw_offset_mm=FIXED_JAW_FACE_MM + t.grip_width_mm / 2 + gripper_cfg.open_margin_mm / 2,
                    protrusion_mm=tray_cfg.protrusion_mm, approach_mm=tray_cfg.approach_mm,
-                   grasp_standoff_mm=tray_cfg.grasp_standoff_mm, pull_mm=tray_cfg.pull_mm,
-                   extract_mm=tray_cfg.extract_mm, lift_mm=tray_cfg.lift_mm,
+                   grasp_standoff_mm=tray_cfg.grasp_standoff_mm,
+                   # pull-out per part: what it takes to clear its socket (length − what sticks out + margin), with
+                   # up to PULL_EXTRA_MM more where it fits; never more than the configured maximum
+                   pull_mm=min(tray_cfg.pull_mm, _needed_pull(t, tray_cfg) + PULL_EXTRA_MM),
+                   extract_mm=min(tray_cfg.pull_mm, _needed_pull(t, tray_cfg)), lift_mm=tray_cfg.lift_mm,
                    max_pitch_deg=tray_cfg.max_pitch_deg, pitch_step_deg=tray_cfg.pitch_step_deg)
+
+
+PULL_MARGIN_MM = 10.0  # pulled this much further than the part can be deep in its socket (glue: 110 + 10 = the old 120)
+PULL_EXTRA_MM = 40.0  # preferred extra pull-out when reachable
+
+
+def _needed_pull(t, tray_cfg) -> float:
+    """Straight pull-out that clears this part from its socket: it sits at most (length − protrusion) deep."""
+    return max(t.length_mm - tray_cfg.protrusion_mm, 0.0) + PULL_MARGIN_MM
 
 
 @dataclass

@@ -21,11 +21,11 @@ from typing import Callable, Union
 import numpy as np
 
 from ..joints import BODY
-from .kinematics import ArmModel, PathError
+from .kinematics import POSITION_TOL_M, ArmModel, PathError
 
 Pose = dict[str, float]
 JOINT_LIMIT = 100.0
-MAX_IK_ERR_M = 0.002
+MAX_IK_ERR_M = POSITION_TOL_M  # see motion/kinematics.py
 
 
 # ---------- steps (the executable nouns) ----------

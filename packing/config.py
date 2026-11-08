@@ -75,11 +75,11 @@ class TrayCfg:
     reference_points: list[str]  # pockets touched in "pockets" calibration mode (>= 3, spread out)
     calibration_mode: str = "corners"  # corners: touch the 4 plate corners | pockets: touch reference_points
     protrusion_mm: float = 10.0  # how far every item sticks out of the tray face
-    extract_mm: float = 120.0  # pull straight out along the tray normal at least this far
+    extract_mm: float = 120.0  # (unused by picks now: the pull-out is per part — tray/pick.py PickSettings.for_type)
     approach_mm: float = 30.0  # stand-off above the item top before the final straight approach
     # picking (packing/tray/pick.py)
     grasp_standoff_mm: float = 3.81  # tool tip off the tray face when the gripper closes (0.15 in)
-    pull_mm: float = 150.0  # preferred straight pull-out along the normal (>= extract_mm)
+    pull_mm: float = 150.0  # MAX straight pull-out along the normal (per part: what clears its socket + up to 40 mm)
     lift_mm: float = 100.0  # then straight up this far
     max_pitch_deg: float = 40.0  # tool may pitch down up to this to fit the pull-out (smallest that fits wins)
     pitch_step_deg: float = 10.0

@@ -126,8 +126,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `GripperCfg.open_for`, chord of the jaw swing, `jaw_length_mm` 80 URDF estimate, deg/unit from the calibration;
   part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate; tool point aimed beside
   the part toward the **fixed jaw** — its inner face is at the tool point, from the meshes — by radius + half margin)
-  → grip (miss: open + back out) → pull straight out `pull_mm` (150,
-  else `extract_mm` 120) → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
+  → grip (miss: open + back out) → pull straight out — per part: what clears its socket
+  (`length_mm` − protrusion + 10 mm) up to 40 mm more where it fits, max `pull_mm` 150 → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
   uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
   jaws tilt with the pitch, up to ~40°). Jaw tips stick out ~6 mm past the tool point (open question:
@@ -171,6 +171,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   rim, end above the floor; no wall check), box → its supply spot mirrored right. Tray goes on the LEFT.
   `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
   Orders → Check). Part `length_mm` per tray type = estimates (drop height).
+- **Planning tolerances** (user: a few mm of play is fine — prefer plans that work): `POSITION_TOL_M` 4 mm (IK
+  reach for every planned point), `MAX_JOINT_STEP` 6 units per straight-line step (motion/kinematics.py).
 - **Planned-path view**: every dry run (pick, box move, go-to, order Check) returns `path` = tool-point segments
   (`program.tip_path`: free / line / grip / release); a failed plan returns 422 with detail `{message, path,
   fail_m}` (`PathError.point/.steps/.start`, kept through `PathError.wrap` by every planner layer). Both 3D views
