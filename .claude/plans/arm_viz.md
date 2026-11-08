@@ -102,6 +102,17 @@ ArmState = {
                                  calibrating / moving / packing).
 - POST /api/arm/pick           {"pocket", "confirm_move"} → {"plan", "calibration", "motors_will_turn_on", "started"}
                                  (Controls tab Procedures; plan in .claude/plans/tray_pick.md)
+- GET  /api/boxes              → {"boxes": [{id, state available|in_use|packed, location supply|pack|output,
+                                 order_id, pose 4x4 at its location, report}], "pack_spot_mm": [x, y], "geometry"}
+- POST /api/boxes/capture      motors off, jaws closed on a box tab (gripper down) → adds that box (BoxesState);
+                                 409 motors on / 422 not a plausible tab grasp, on the right, or overlapping
+- DELETE /api/boxes/{id}       remove (409 while in use);  POST /api/boxes/{id}/reset → empty at its supply spot
+- POST /api/arm/box-move       {"box_id", "to": supply|pack|output, "confirm_move"} → {"plan", "motors_will_turn_on",
+                                 "started"}; same runner / Stop / GET /api/arm/goto state; records the new location
+- POST /api/orders/{id}/pack-plan  dry run of packing the order (box in, picks + drops, box out) → {"plan": {box_id,
+                                 items: [{pocket, sku, pitch_deg, drop_tilt_deg}], step_count}} or 422 with the reason
+- Tray pockets (GET /api/tray) also carry "reserved_by" (order id) and "locked" (its order is being packed);
+  orders carry "slots" (reserved unit per item, null = short). Plan: boxes_and_reservations.md
 - GET  /api/arm/preview        → {"poses": [{"name", "label"}]}; GET /api/arm/preview/{name} → ArmState
                                  (no longer used by the dashboard since the Controls tab, 2026-11-07)
                                  (source "preview": FK of a generic pose, no arm needed; "home" = calibration center)

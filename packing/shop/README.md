@@ -65,3 +65,16 @@ Orders arrive "received" — the robot packs them only after **Action** on the d
 pockets marked full on the dashboard (all empty = every order is refused for stock). `--allow-host '*.trycloudflare.com'`
 restricts the Host header (default: any). The chat agent's `/mcp` is separate and unchanged.
 
+## Stock reservations
+Every item of an open order owns one specific tray pocket (lowest-numbered free first; all-or-nothing, so stock can
+never be oversold). Cancel/delete frees them, packing uses them, a failed order keeps them until deleted. A reserved
+pocket marked empty moves its reservation to another free unit (or the order shows "Short"). Pockets of an order
+being packed are locked on the dashboard. Tray map: ring + `#order`; orders table: "Reserved: aa_1, …".
+
+## Boxes and packing on the arm (`--robot`)
+Calibration tab → **Packing boxes**: put empty boxes on the LEFT (tabs toward the arm's swivel, centers ≥ 12 cm
+apart), release the motors, close the jaws on a tab with the gripper pointing down, **Add box**. Clicking **Action**
+then packs the order on the real arm (`packing/boxes/packer.py`): box → pack spot (middle), each reserved part from
+the tray dropped in, box → its spot mirrored on the right. **Check** on an order = dry run (nothing moves).
+Controls tab → **Move a box** moves one box by itself. Details: `.claude/plans/boxes_and_reservations.md`.
+
