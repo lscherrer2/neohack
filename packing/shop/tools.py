@@ -30,6 +30,11 @@ class ShopTools:
         return f"We have: {', '.join(parts)}. One box holds up to {self.catalog.max_items} items."
 
     def place_order(self, items, customer_name: str, phone: str | None = None) -> str:
+        return self.create_order(items, customer_name, phone)[1]
+
+    def create_order(self, items, customer_name: str, phone: str | None = None,
+                     source: str = "mcp") -> tuple[Order, str]:
+        """Place an order; returns (order, spoken confirmation). OrderError if invalid / out of stock."""
         if not (customer_name or "").strip():
             raise OrderError("What name should I put the order under?")
         skus = parse_items(items, self.catalog)
@@ -40,9 +45,9 @@ class ShopTools:
         short = [f"{self.catalog.products[s]} (only {stock.get(s, 0)} left)" for s, n in need.items() if n > stock.get(s, 0)]
         if short:
             raise OrderError("Sorry, not enough stock: " + ", ".join(short) + ".")
-        order, _ = self.store.create(normalize_phone(phone) if phone else "", skus, customer_name.strip(), "mcp")
+        order, _ = self.store.create(normalize_phone(phone) if phone else "", skus, customer_name.strip(), source)
         pos = self.store.queue_position(order.id)
-        return (f"Order number {order.id} for {order.customer_name} is placed: {self.catalog.describe(order.items)}. "
+        return order, (f"Order number {order.id} for {order.customer_name} is placed: {self.catalog.describe(order.items)}. "
                 f"It's number {pos} in line.")
 
     def _get(self, order_id) -> Order:

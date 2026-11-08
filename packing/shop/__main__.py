@@ -2,6 +2,8 @@
    python -m packing.shop serve [--robot]  # order server: MCP tools at /mcp + robot job API (+ arm with --robot)
    python -m packing.shop robot [--robot]  # robot agent (simulated packing unless --robot)
    python -m packing.shop chat             # Claude Haiku ordering agent using the MCP tools
+Remote agents (cloud agent via a tunnel): `start` / `serve` also serve a FastMCP server at /agent/mcp
+(get_inventory + create_order; check/cancel stubbed) — see mcp_server.py; --mcp-token / --allow-host.
 
 All data is real: orders in packing/data/shop_orders.db, stock from packing/data/inventory.db
 (the packing cell's inventory; restock it from the dashboard after refilling the shelves).
@@ -84,6 +86,11 @@ def main() -> None:
         q.add_argument("--db", help="orders database (default packing/data/shop_orders.db)")
         q.add_argument("--auto", action="store_true",
                        help="robot packs new orders automatically (default: only after clicking Action)")
+        q.add_argument("--mcp-token", help="remote-agent MCP (/agent/mcp): require 'Authorization: Bearer <token>' "
+                                           "(default: env SHOP_MCP_TOKEN, else open)")
+        q.add_argument("--allow-host", action="append", metavar="HOST",
+                       help="remote-agent MCP: only accept these Host headers (+ localhost), e.g. "
+                            "'*.trycloudflare.com' (repeatable; default: any host)")
     for q in (st, r):
         q.add_argument("--robot", action="store_true", help="pack on the real arm (default: simulated packing)")
         q.add_argument("--sim-seconds", type=float, default=3.0, help="simulated packing time per item")
@@ -111,9 +118,15 @@ def main() -> None:
             url = f"http://127.0.0.1:{args.port}"
             threading.Thread(target=run, args=(url, make_packer(args, shelf, hub)), name="robot-agent",
                              daemon=True).start()
+        import os
+
+        token = args.mcp_token or os.environ.get("SHOP_MCP_TOKEN") or None
         print(f"Dashboard: http://{args.host}:{args.port}/dashboard/")
+        print(f"Remote-agent MCP: http://{args.host}:{args.port}/agent/mcp "
+              f"(auth: {'bearer token' if token else 'NONE, open'}; hosts: {', '.join(args.allow_host or ['any'])})")
         try:
-            uvicorn.run(create_server(store, catalog, auto_dispatch=args.auto, shelf=shelf, hub=hub),
+            uvicorn.run(create_server(store, catalog, auto_dispatch=args.auto, shelf=shelf, hub=hub,
+                                      agent_token=token, agent_hosts=args.allow_host),
                         host=args.host, port=args.port, timeout_graceful_shutdown=2)
         finally:
             if hub.connected and hub.mode == "idle":

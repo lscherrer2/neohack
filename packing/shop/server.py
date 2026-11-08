@@ -154,11 +154,17 @@ class FailedIn(BaseModel):
 
 
 def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None = None,
-                  auto_dispatch: bool = False, shelf=None, hub=None) -> FastAPI:
+                  auto_dispatch: bool = False, shelf=None, hub=None, agent_token: str | None = None,
+                  agent_hosts: list[str] | None = None) -> FastAPI:
     """auto_dispatch=False: the robot only packs orders someone clicked "Action" on.
-    hub: ArmHub (live arm view + calibration tab); None = no arm in this server."""
+    hub: ArmHub (live arm view + calibration tab); None = no arm in this server.
+    agent_token / agent_hosts: the remote-agent FastMCP server at /agent/mcp (mcp_server.py) — bearer token
+    (None = open) and allowed Host headers (None = any, like /mcp; tunnel hostnames change)."""
+    from .mcp_server import create_mcp, http_app as agent_http_app
+
     tools = ShopTools(store, catalog)
     events = events or EventLog()
+    agent_app = agent_http_app(create_mcp(store, catalog, agent_token), agent_hosts, any_host=agent_hosts is None)
     mcp = build_mcp(tools, events)
     mcp_app = mcp.streamable_http_app(
         streamable_http_path="/mcp", stateless_http=True, json_response=True,
@@ -172,7 +178,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         if recovered:
             events.record("system", f"Order {recovered[0].id} was mid-pack when the server stopped; "
                                     "the robot agent will resume it", order_id=recovered[0].id)
-        async with mcp.session_manager.run():
+        async with mcp.session_manager.run(), agent_app.lifespan(agent_app):
             yield
 
     app = FastAPI(title="Shop server", lifespan=lifespan)
@@ -707,5 +713,6 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    app.mount("/agent", agent_app)  # FastMCP for remote agents: /agent/mcp (inventory + create order)
     app.mount("/", mcp_app)  # after the routes above, so /mcp falls through to the MCP app
     return app

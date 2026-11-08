@@ -10,7 +10,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 ## Environment
 - `.venv/` (Python 3.13): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`. Deps: `feetech-servo-sdk`
   (`scservo_sdk`), `pyserial`, `numpy`, `pyyaml`, `placo` (IK), `mcp` 2.x (`MCPServer`, `from mcp import Client`),
-  `opencv-python`, `fastapi`/`uvicorn`, `anthropic` 2.x, `ezdxf` (tray DXF), `scipy` (rigid fit).
+  `opencv-python`, `fastapi`/`uvicorn`, `anthropic` 2.x, `ezdxf` (tray DXF), `scipy` (rigid fit), `fastmcp` 4.x
+  (remote-agent MCP at `/agent/mcp`; coexists with `mcp` 2.x).
   Run things as `.venv/bin/python -m packing ...`.
 - Frontend (`packing/shop/web/`): Node + npm (Vite, React 19, TS, three / @react-three/fiber / drei).
   `npm install && npm run build` → `packing/shop/static/app/` (**built output is committed** so Python-only
@@ -176,6 +177,12 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   projected into the arm's vertical plane (URDF lift/elbow/wrist origins sit 18.3 mm along their axes — fake jogs
   otherwise); the tool point is the true FK position. Avoid CSS class names that equal event kinds
   (`tool/robot/order/chat/error/system`) — they collide with the activity list styles.
+- **Remote-agent MCP** (`shop/mcp_server.py`, FastMCP, mounted by `start`/`serve` at **`/agent/mcp`**, streamable
+  HTTP, stateless): `get_inventory` (sku/name/available = stock − open orders) and `create_order` (customer_name,
+  items, phone?) are real (same DBs; orders arrive `queued`, source `mcp-remote`, so the robot only packs after
+  Action); `check_order` / `cancel_order` are stubs. For the cloud-agent tunnel test. Flags: `--mcp-token` (or env
+  `SHOP_MCP_TOKEN`) → Bearer auth, else open; `--allow-host` (repeatable, wildcards) → Host check, else any host.
+  `/mcp` (chat agent's tools) is unchanged.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
 
 ## Conventions

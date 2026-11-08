@@ -51,3 +51,16 @@ chat (Claude Haiku) ──MCP──▶ order server ◀──HTTP── robot ag
   or later a voice agent.
 
 Tests: `python -m unittest packing.tests.test_shop packing.tests.test_tray packing.tests.test_arm_view`.
+
+## Remote-agent MCP (`/agent/mcp`)
+Started automatically with `start` / `serve` (FastMCP, `mcp_server.py`). For a cloud agent through a tunnel:
+
+    python -m packing.shop start --robot --mcp-token SECRET        # or env SHOP_MCP_TOKEN
+    cloudflared tunnel --url http://localhost:8000                  # or ngrok http 8000
+    # agent: MCP server URL https://<tunnel-host>/agent/mcp, header Authorization: Bearer SECRET
+
+Tools: `get_inventory`, `create_order` (real); `check_order`, `cancel_order` (stubs, change nothing).
+Orders arrive "received" — the robot packs them only after **Action** on the dashboard. Stock comes from the tray
+pockets marked full on the dashboard (all empty = every order is refused for stock). `--allow-host '*.trycloudflare.com'`
+restricts the Host header (default: any). The chat agent's `/mcp` is separate and unchanged.
+
