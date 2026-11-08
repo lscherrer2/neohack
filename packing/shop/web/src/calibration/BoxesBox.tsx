@@ -39,15 +39,16 @@ export default function BoxesBox({ arm, boxes, apply }: {
       </header>
       <div className="cal-body">
         <p className="instr sub">
-          Put the empty boxes on the <strong>left</strong> of the arm, tabs pointing at the arm's swivel. For each box:
-          release the motors (hold the arm), point the gripper straight down and close the jaws on the tab, about
-          10 mm below its top, then press <strong>Add box</strong>. Keep box centers ≥ 12 cm apart (a tab points at
-          the box behind it).
+          Put the empty boxes on the <strong>left</strong> of the arm, tabs pointing at the arm's swivel, box centers at
+          least <strong>30 cm from the swivel</strong> (closer, the arm can't hold the gripper level at the tab) and
+          ≥ 12 cm apart. For each box: release the motors (hold the arm), hold the gripper <strong>level</strong>,
+          pointing along the tab toward the box, close the jaws up/down on the tab near the wall, then press
+          <strong>Add box</strong>.
         </p>
         <button type="button" className="big" disabled={!canCapture || busy !== null}
                 title={!arm?.connected ? "Connect the arm first" : arm.torque ? "Release the motors first (Controls → Motors, or Start calibration)" : "Add the box whose tab is in the jaws"}
                 onClick={() => act("add", "POST", "/api/boxes/capture")}>
-          {busy === "add" ? "Adding…" : "Add box (jaws on its tab)"}
+          {busy === "add" ? "Adding…" : "Add box (jaws closed on its tab)"}
         </button>
         {arm?.connected && arm.torque && (
           <p className="sub">Motors are on — release them first (Controls tab → Motors → Released, or Start calibration above).</p>

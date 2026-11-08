@@ -155,14 +155,18 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   restock → `fill_short`. **Locked**: units of a `packing` order can't be changed from the dashboard (409; bulk fill
   skips them). Tray API: `reserved_by`, `locked`; orders carry `slots`. Sim packing consumes exactly those units.
 - **Boxes + full order packing** (plan `.claude/plans/boxes_and_reservations.md`, code `packing/boxes/`, sim-tested,
-  not run on hardware): supply boxes on the LEFT, tab facing the swivel; calibrate = motors off, jaws closed on the
-  tab (gripper down) → Calibration tab "Add box". Order (Action, `start --robot` → `TrayPacker`): box → pack spot
-  (260, 0) mm, each reserved part picked + dropped in, box → its supply spot mirrored to the right. Box moves lift
-  straight up 30 mm (wrist limit: straight-down only ~10 cm up near the base), carry in joint space (checked: no
-  dip, level, no overlap with boxes/tray), set down at exactly the picked height. Tray is being moved to the LEFT
-  (straight ahead its pull-outs crossed the pack spot). `GET /api/boxes`, `POST /api/boxes/capture`,
-  `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run, Orders → Check). Part `length_mm` per tray
-  type = estimates (drop height).
+  not run on hardware): supply boxes on the LEFT, tab facing the swivel, box centers **≥ ~30 cm from the swivel**
+  and ≥ 12 cm apart. **Grip is horizontal**: gripper level, pointing away from the arm along the tab, jaws closing
+  up/down on the 2 mm tab plate (fixed jaw under the plate = wrist roll ≈ 0; on top needs roll ~180°, past its
+  limit). A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that
+  grip by hand → Calibration tab "Add box". Box move: in level along the tab (22 mm), grip (no width check: plate
+  2 mm / wall ~0.5 mm), straight up 30 mm, joint-space carry (no dip, box tilt ≤ 30°, no overlap with boxes/tray),
+  straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
+  box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (345, 0) mm (grip point 26 cm out; further
+  out the drops get unreachable), each reserved part picked + dropped (centered over the opening, jaws above the
+  rim, end above the floor; no wall check), box → its supply spot mirrored right. Tray goes on the LEFT.
+  `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
+  Orders → Check). Part `length_mm` per tray type = estimates (drop height).
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.

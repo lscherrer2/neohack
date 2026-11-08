@@ -25,7 +25,6 @@ from .geometry import BOX_H, BOX_W, WALL
 from .move import box_pose, down_seeds, plan_box_move
 
 DROP_ABOVE_FLOOR_MM = 8.0  # part's lowest point above the box floor at release
-DROP_MARGIN_MM = 6.0  # part kept this far inside the inner walls
 RIM_CLEAR_MM = 12.0  # jaws (tool point) at least this far above the rim
 DROP_SPEED_MM_S = 25.0
 RETREAT_MM = 120.0  # after letting go: up to this far above the box rim before moving on
@@ -79,16 +78,13 @@ def plan_drop(model: ArmModel, b: ProgramBuilder, T_box: np.ndarray, length_mm: 
                       max(top + RIM_CLEAR_MM / 1000, floor + DROP_ABOVE_FLOOR_MM / 1000 - zt[2] * L)])
     targets, poses = best_targets(model, ik, p, down, any_dir, [q, *down_seeds(model, p)])
     T = model.fk(poses[0])
+    if np.linalg.norm(T[:3, 3] - p) > 0.002:
+        raise PathError(f"{label}: can't reach the drop point over the box ({np.round(p * 1000, 1)} mm)")
     zt = T[:3, 2]
-    inner = BOX_W / 2 - WALL - DROP_MARGIN_MM / 1000
-    R_inv = T_box[:3, :3].T
-    for s in np.linspace(0, 1, 9):  # the part, from the jaws to its end, inside the walls and above the floor
-        q_box = R_inv @ (T[:3, 3] + zt * L * s - T_box[:3, 3])
-        if q_box[2] < BOX_H and (abs(q_box[0]) > inner or abs(q_box[1]) > inner):
-            raise PathError(f"{label}: the {length_mm:.0f} mm part would hit the box wall (tilted "
-                            f"{np.degrees(np.arccos(-zt[2])):.0f}°) — shorter part or a higher, straighter drop needed")
-        if q_box[2] < WALL + DROP_ABOVE_FLOOR_MM / 2000:
-            raise PathError(f"{label}: the part would touch the box floor")
+    # no wall check (user: the walls are ~0.5 mm): the part is centered over the opening, its end above the floor
+    end = T[:3, 3] + zt * L
+    if end[2] < floor + DROP_ABOVE_FLOOR_MM / 2000:
+        raise PathError(f"{label}: the part would touch the box floor")
     b.joint_to(targets[0], f"{label}: over the box", seeds=poses, targets=targets[:1])
     b.open_gripper(f"{label}: release", open_value)
     retreat_up(model, b, T_box, f"{label}: up and away from the box")

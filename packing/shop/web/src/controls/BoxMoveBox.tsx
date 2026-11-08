@@ -8,6 +8,7 @@ const DEST: Record<Dest, string> = { supply: "back to its left spot", pack: "to 
 
 interface MoveReply {
   plan: { box_id: number; from: Dest; to: Dest; travel_units: number; carry_mm: number; land_tilt_deg: number;
+          max_carry_tilt_deg?: number;
           steps: { step: string; label: string }[] };
   motors_will_turn_on: boolean;
   started: boolean;
@@ -44,9 +45,10 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
 
   const k = plan?.plan;
   const body = k
-    ? `Box ${k.box_id}: open the jaws, come straight down onto its tab, grip, lift straight up ${k.carry_mm} mm, carry it ` +
-      `${DEST[k.to]} (largest joint change ${k.travel_units.toFixed(0)} units), lower it straight down to exactly the ` +
-      `height it was picked from (gripper ${k.land_tilt_deg.toFixed(1)}° off vertical), release and lift the jaws off. ` +
+    ? `Box ${k.box_id}: open the jaws, come in level along its tab, grip, lift straight up ${k.carry_mm} mm, carry it ` +
+      `${DEST[k.to]} (largest joint change ${k.travel_units.toFixed(0)} units; the box tilts up to ` +
+      `${(k.max_carry_tilt_deg ?? 0).toFixed(0)}° on the way), lower it straight down to exactly the height it was ` +
+      `picked from (box ${k.land_tilt_deg.toFixed(1)}° off level), release and back out level along the tab. ` +
       (plan!.motors_will_turn_on ? "The motors are released: they lock first and hold the arm where it is. " : "") +
       "Keep the area clear; press Stop to halt."
     : "";

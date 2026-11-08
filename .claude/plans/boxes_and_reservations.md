@@ -64,3 +64,21 @@ packed (packed = done). UI: Boxes section on the Calibration tab + boxes in the 
 - Hardware: calibrate the moved tray, add the boxes, Check an order, then a supervised first run.
 - Measure `length_mm` per part type and the tab grip estimate (`grip_from_top_mm` / `grip_from_wall_mm`).
 - Resume after a mid-order failure is partial (box location is recorded once it's down at the pack spot).
+
+### Change 2026-11-07 (later): horizontal grip
+User: the gripper is HORIZONTAL — level, pointing away from the arm along the tab — and the jaws close up/down on
+the tab plate (parallel to the desk); approach level along the tab. (Box 2 had been calibrated on a wall to test,
+which made the vertical-grip planner report a 12° carry tilt.)
+- Capture (`box_from_grasp`): gripper ≤ 25° off level, pointing outward along the tab, jaws ≤ 35° off vertical;
+  plate mid-plane = tool point − x·1 mm; box bottom = plate mid − 76 mm. `grip_from_wall_mm` 8 (estimate).
+- Move: in level along the tab `approach_mm` 22 → grip (min width 0: user — thin plate/wall, a width test can't
+  tell a miss) → up `carry_mm` 30 → joint carry → down to the exact grasp height → release → back out level 22 mm.
+  Tilt checks use the BOX tilt (`box_tilt_deg`): carry ≤ 30° (user: tilting is fine), set-down ≤ 5°.
+- Reach (sim): a level outward grip needs the grip point ≥ ~25 cm from the swivel (17–25 cm: unreachable; closer:
+  only by folding over, 30–50° tilted). Jaw-on-top (tool x up) hits the wrist_roll limit (20° off) → jaw under.
+  Pack spot 345 mm: grip point 26 cm out, and drops over the box still reachable (at 360 they weren't above 13 cm).
+  Back-out longer than ~22 mm at the pack spot ran into the 25 cm limit.
+- Drop: wall check removed (user: walls ~0.5 mm); part centered over the opening, jaws ≥ rim + 12 mm, end above
+  the floor.
+- Sim layout used in tests: tray rotated 60° left at 33 cm, supply box at (316, 160) mm → all 33 pockets plan.
+

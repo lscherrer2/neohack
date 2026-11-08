@@ -2,8 +2,11 @@
 
 Box frame (as in box.step, meters): origin = bottom center, z up, the tab sticks out of the −y wall.
 Measured from box.step (2026-11-07): body 76.2 × 76.2 × 77 mm, open top, 0.8 mm walls; the tab is a 12.6 mm wide
-(x ±6.3) plate along the top edge (z 75–77) from the wall (y −38.1) out to y −61.0, with a rib below it to
-z 38.5. The jaws close across the tab's 12.6 mm width with the gripper pointing down.
+(x ±6.3), 2 mm thick plate parallel to the desk along the top edge (z 75–77), from the wall (y −38.1) out to
+y −61.0.
+
+Grip (user, 2026-11-07): the gripper is HORIZONTAL — pointing away from the arm along the tab, at tab height —
+and the jaws close UP/DOWN on the 2 mm plate. It comes in level along the tab, grips, lifts straight up.
 
 Placement rule (user, 2026-11-07): a box's tab faces the arm's swivel (pan axis), so the box +y axis points
 radially outward. With 5 DOF the tool yaw follows the pan, so a box carried around keeps its tab facing the
@@ -25,7 +28,8 @@ MM = 0.001
 BOX_W = 76.2 * MM  # outer, square
 BOX_H = 77.0 * MM
 WALL = 0.8 * MM
-TAB_W = 12.6 * MM  # across the tab (box x) — what the jaws close on
+TAB_W = 12.6 * MM  # across the tab (box x)
+TAB_T = 2.0 * MM  # plate thickness (box z 75..77) — what the jaws close on
 TAB_OUT = (61.0 - 38.1) * MM  # how far the tab sticks out of the wall
 HALF = BOX_W / 2
 
@@ -34,9 +38,8 @@ HALF = BOX_W / 2
 class GripCfg:
     """Where the tool point sits on the tab when the jaws are closed on it (estimate; `cell.yaml` `boxes:`)."""
 
-    from_top_mm: float = 10.0  # tool point below the tab top (= box top)
-    from_wall_mm: float = 11.0  # tool point out from the box wall along the tab (tab is 22.9 mm long)
-    max_tilt_deg: float = 25.0  # capture refused if the gripper isn't pointing down within this
+    from_wall_mm: float = 8.0  # tool point out from the box wall along the tab (tab is 22.9 mm long)
+    max_tilt_deg: float = 25.0  # capture refused if the gripper isn't level within this
     max_table_mm: float = 20.0  # capture refused if the box bottom isn't this close to the table (z = 0)
 
 
@@ -65,25 +68,35 @@ class CaptureError(ValueError):
 
 
 def box_from_grasp(T_tool: np.ndarray, pan_xy: np.ndarray, g: GripCfg = GripCfg()) -> tuple[np.ndarray, dict]:
-    """Box pose (4x4) from the tool pose with the jaws closed on the tab. Also returns a report.
-    The fixed jaw's inner face is at the tool point and the part sits toward tool −x (from the jaw meshes), so
-    the tab's center plane is TAB_W/2 toward −x."""
+    """Box pose (4x4) from the tool pose with the jaws closed (up/down) on the tab, gripper level and pointing
+    away from the arm. Also returns a report. The fixed jaw's inner face is at the tool point and the part sits
+    toward tool −x (jaw meshes), so the plate's mid-plane is TAB_T/2 toward −x (x is vertical: up or down)."""
     T_tool = np.asarray(T_tool, float)
     p, x_tool, z_tool = T_tool[:3, 3], T_tool[:3, 0], T_tool[:3, 2]
-    tilt = math.degrees(math.acos(max(-1.0, min(1.0, float(-z_tool[2])))))  # 0 = pointing straight down
+    tilt = math.degrees(math.asin(min(1.0, abs(float(z_tool[2])))))  # 0 = gripper level
     if tilt > g.max_tilt_deg:
-        raise CaptureError(f"the gripper should point down at the tab (it's {tilt:.0f}° off vertical)")
-    tab_mid = p - x_tool * (TAB_W / 2)
+        raise CaptureError(f"the gripper should be level, pointing along the tab (it's {tilt:.0f}° off level)")
+    jaws = math.degrees(math.acos(min(1.0, abs(float(x_tool[2])))))  # 0 = jaws close straight up/down
+    if jaws > 35:
+        raise CaptureError(f"the jaws should close up/down on the tab (they're {jaws:.0f}° off)")
+    tab_mid = p - x_tool * (TAB_T / 2)
     u = radial(pan_xy, tab_mid)  # tab faces the swivel: the box lies further out
+    if float(z_tool[:2] @ u[:2]) < math.cos(math.radians(50)):
+        raise CaptureError("the gripper should point away from the arm, along the tab toward the box")
     center_xy = tab_mid[:2] + u[:2] * (HALF + g.from_wall_mm * MM)
-    bottom = p[2] + g.from_top_mm * MM - BOX_H
+    bottom = tab_mid[2] - (BOX_H - TAB_T / 2)
     if abs(bottom) > g.max_table_mm * MM:
-        raise CaptureError(f"that puts the box bottom {bottom * 1000:+.0f} mm from the table — are the jaws on the "
-                           f"tab, about {g.from_top_mm:.0f} mm below its top?")
+        raise CaptureError(f"that puts the box bottom {bottom * 1000:+.0f} mm from the table — are the jaws closed "
+                           f"on the tab (the plate along the box's top edge)?")
     T_box = box_frame(center_xy, bottom, pan_xy)
-    across = abs(float(x_tool @ u))  # jaws should close across the tab (tangential), not along it
-    return T_box, {"tilt_deg": round(tilt, 1), "bottom_mm": round(bottom * 1000, 1),
-                   "jaw_along_tab": round(math.degrees(math.asin(min(1.0, across))), 1)}
+    return T_box, {"tilt_deg": round(tilt, 1), "jaws_off_vertical_deg": round(jaws, 1),
+                   "bottom_mm": round(bottom * 1000, 1)}
+
+
+def box_tilt_deg(T_tool: np.ndarray, tool_in_box: np.ndarray) -> float:
+    """How far the box's up axis is from vertical when the tool is at T_tool holding it with this grasp."""
+    z = (T_tool @ np.linalg.inv(tool_in_box))[:3, 2]
+    return math.degrees(math.acos(max(-1.0, min(1.0, float(z[2])))))
 
 
 def footprint(T_box: np.ndarray, margin: float = 0.0) -> np.ndarray:

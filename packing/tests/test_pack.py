@@ -30,7 +30,7 @@ from packing.tray.calibration import calibrate
 
 PAN = MODEL.pan_xy
 HOME = dict.fromkeys(["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"], 0.0)
-SUPPLY = (0.22, 0.12)
+SUPPLY = (0.316, 0.16)  # >= ~30 cm from the swivel: the level tab grip reaches
 
 
 def left_tray(cfg, az_deg=60, dist=0.33):
@@ -74,13 +74,12 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(len(drops), 3)
         for i, sku in zip(drops, o.items):
             T = MODEL.fk(plan.steps[i - 1].pose)  # the drop pose
-            inner = BOX_W / 2 - WALL
-            for s in np.linspace(0, 1, 5):  # the held part, jaws to its end, is inside the box walls
-                p = T_pack[:3, :3].T @ (T[:3, 3] + T[:3, 2] * lengths[sku] * s - T_pack[:3, 3])
-                if p[2] < BOX_H:
-                    self.assertLess(max(abs(p[0]), abs(p[1])), inner)
-                self.assertGreater(p[2], WALL)
-        self.assertEqual(plan.steps[-1].label, "jaws straight up off the tab")  # ends releasing the box at output
+            mid = T[:3, 3] + T[:3, 2] * lengths[sku] / 2  # the held part is centered over the opening...
+            self.assertLess(np.linalg.norm((mid - T_pack[:3, 3])[:2]) * 1000, 3.0)
+            end = T_pack[:3, :3].T @ (T[:3, 3] + T[:3, 2] * lengths[sku] - T_pack[:3, 3])
+            self.assertGreater(end[2], WALL)  # ...its end above the floor
+            self.assertGreater(T[2, 3], T_pack[2, 3] + BOX_H)  # jaws above the rim
+        self.assertEqual(plan.steps[-1].label, "back out level along the tab")  # ends releasing the box at output
 
     def test_needs_every_unit_reserved(self):
         with self.assertRaises(ValueError):

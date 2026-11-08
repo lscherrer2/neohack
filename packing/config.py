@@ -105,13 +105,13 @@ class TrayCfg:
 class BoxesCfg:
     """Packing boxes (packing/boxes/): calibration grip estimate, pack spot, carry motion."""
 
-    grip_from_top_mm: float = 10.0  # tool point below the box top when the jaws are closed on the tab
-    grip_from_wall_mm: float = 11.0  # tool point out from the box wall along the tab
-    pack_spot_mm: tuple[float, float] = (260.0, 0.0)  # box center (robot x, y) where orders are packed; 260 =
-    # flattest set-down in sim (2.8° tilt; 220 mm gave 7° — too close to the base), 7 cm short of the tray
-    carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging). Low on purpose:
-    # pointing straight down, wrist_flex hits its stop ~10 cm above the table near the base — higher tilts the box
-    approach_mm: float = 30.0  # open jaws come straight down onto the tab from this far above
+    grip_from_wall_mm: float = 8.0  # tool point out from the box wall along the tab (jaws closed up/down on it)
+    pack_spot_mm: tuple[float, float] = (345.0, 0.0)  # box center (robot x, y) where orders are packed. The level
+    # tab grip (gripper pointing away along the tab) only reaches with the grip point >= ~25 cm from the swivel
+    # -> box centers >= ~30 cm out (345: grip point at 26 cm). Further out, drops over the box get unreachable
+    carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging, clears neighbours)
+    approach_mm: float = 22.0  # open jaws come in level along the tab from this far back (and back out after):
+    # clears the tab tip (~15 mm behind the grip point + jaw tips); longer runs below the ~25 cm level-grip limit
     line_speed_mm_s: float = 25.0  # straight moves with / near a box
     down_speed_mm_s: float = 12.0  # the last bit down onto the tab / the table
 

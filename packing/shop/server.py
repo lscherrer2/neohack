@@ -22,7 +22,7 @@
   POST /api/arm/torque          {"on": bool, "confirm_hold": bool} lock / release the motors while idle (Controls)
   POST /api/arm/pick            {"pocket", "confirm_move"} test pick: dry run, then run (same runner/Stop as go-to)
   GET  /api/boxes               calibrated packing boxes (+ pose at their location, pack spot, geometry)
-  POST /api/boxes/capture       motors off, jaws closed on a box tab: add that box
+  POST /api/boxes/capture       motors off, gripper level along a box tab, jaws closed on it: add that box
   DELETE /api/boxes/{id}        remove a box record;  POST /api/boxes/{id}/reset: back to available at supply
   POST /api/arm/box-move        {"box_id", "to": supply|pack|output, "confirm_move"} move a box by its tab
   POST /api/orders/{id}/pack-plan  dry run of packing that order (box in, picks + drops, box out); nothing moves
@@ -639,7 +639,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
     @app.post("/api/boxes/capture")
     def boxes_capture():
-        """Motors off, jaws closed on a box tab (gripper pointing down): add that box."""
+        """Motors off, gripper level along the tab, jaws closed up/down on it: add that box."""
         h, cfg = _hub(), _box_cfg()
         if not h.connected:
             raise HTTPException(409, "connect the arm first")
@@ -651,7 +651,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             body = {j: v for j, v in q.items() if j != "gripper"}
             with h._lock:
                 T_tool = h.model.fk(body)
-            g = GripCfg(cfg.boxes.grip_from_top_mm, cfg.boxes.grip_from_wall_mm)
+            g = GripCfg(from_wall_mm=cfg.boxes.grip_from_wall_mm)
             T_box, report = box_from_grasp(T_tool, pan, g)
         except (ArmBusy, CaptureError) as e:
             raise HTTPException(409 if isinstance(e, ArmBusy) else 422, str(e)) from e

@@ -45,17 +45,19 @@ tray:
 
 # catalog: (sku -> spoken name) defaults to the tray type names above
 
-# Packing boxes (box.step): calibrated by hand — motors off, jaws closed on the tab, "Add box" (Calibration tab).
+# Packing boxes (box.step): calibrated by hand — motors off, gripper LEVEL pointing along the tab, jaws closed
+# up/down on it, "Add box" (Calibration tab).
 # Each box's tab faces the arm's swivel; supply boxes sit on the LEFT, packed ones go to the mirrored spot on the
 # right. Plan: .claude/plans/boxes_and_reservations.md
 boxes:
-  grip_from_top_mm: 10     # where the tool point sits on the tab when calibrating (estimate: drawing/drops only)
-  grip_from_wall_mm: 11
-  pack_spot_mm: [260, 0]   # box center (robot x, y) where an order is packed: middle of the sweep. 260 = flattest
-                           # set-down in sim (2.8°; 220 tilted 7°: too close to the base), 7 cm short of the tray
-  carry_mm: 30             # lift boxes straight up this far before moving them (no dragging). Kept low: pointing
-                           # straight down, wrist_flex hits its stop ~10 cm up near the base (higher = box tilts)
-  approach_mm: 30          # open jaws come straight down onto the tab from this far above
+  grip_from_wall_mm: 8     # tool point this far out from the box wall along the tab when calibrating (estimate:
+                           # drawing / drops only — the grasp itself is exactly the calibrated one)
+  pack_spot_mm: [345, 0]   # box center (robot x, y) where an order is packed: middle of the sweep. The level tab
+                           # grip reaches only with the grip point >= ~25 cm from the swivel -> box centers >= ~30 cm;
+                           # much further out, the drops over the box get unreachable (345 = grip point at 26 cm)
+  carry_mm: 30             # lift boxes straight up this far before moving them (no dragging, clears neighbours)
+  approach_mm: 22          # open jaws come in level along the tab from this far back, and back out after (clears the
+                           # tab tip; much longer would bring the grip point under the ~25 cm level-grip limit)
   line_speed_mm_s: 25
   down_speed_mm_s: 12
 
