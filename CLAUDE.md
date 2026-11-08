@@ -68,13 +68,15 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
     `arm.py` Arm protocol, RealArm/FakeArm · `keyboard.py` jog key map + raw-terminal input
   - `motion/` `controller.py` `Motion`: smooth joint moves, `follow()` for paths, settle + following-error
     checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line
-    paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view)
+    paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view) · `program.py` motion programs:
+    `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
+    → validated steps → `run(steps, motion)`
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
     (servo calibration) · `tray_calibrate.py` hand-guided tray calibration (CLI)
   - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type + plate
     corner points · `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard
-    calibration, corners/pockets mode) · `goto.py` go-to preview planner
+    calibration, corners/pockets mode) · `goto.py` go-to preview planner · `pick.py` pick planner (`AxisIK`)
   - `hardware/telemetry.py` `TelemetryArm` (publishes joints on read, throttled; `http_publisher` non-blocking)
   - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
     `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
@@ -113,7 +115,15 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `POST /api/arm/stop` halts. Uses the live fit while calibrating if good, else the saved calibration. Turns the
   motors on (holding) if they were off; `POST /api/arm/release` turns them off again for more hand-guided capture.
 - 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
-  report shows the worst angle per item. Picking from pockets (`Cell`) is **not implemented yet**; nor box/drop spot.
+  report shows the worst angle per item.
+- **Pick test** (plan `.claude/plans/tray_pick.md`; `tray/pick.py`, `POST /api/arm/pick {pocket, confirm_move}`,
+  dashboard "Pick test…" in the Go-to box; same runner/Stop as go-to): open → free move to approach point → line in
+  to `grasp_standoff_mm` (0.15 in) off the face → grip (miss: open + back out) → pull straight out `pull_mm` (150,
+  else `extract_mm` 120) → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
+  `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
+  uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
+  jaws tilt with the pitch, up to ~40°). **No inventory change** (test); drop spot TBD; `Cell` doesn't pick from
+  pockets yet. Not yet run on the real arm.
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`
 - `python -m packing.shop start [--robot] [--auto]` = one process: FastAPI server on :8000 + MCP tools

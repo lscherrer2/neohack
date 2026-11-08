@@ -1,7 +1,9 @@
-"""Runs a planned "go to" preview move (packing/tray/goto.py) on the hub's arm in a background thread.
+"""Runs a planned arm program on the hub's arm in a background thread: a "go to" preview (packing/tray/goto.py)
+or a test pick (packing/tray/pick.py). Any plan with `.label`, `.steps` (packing/motion/program.py) and
+`.summary()` works.
 
-Safety: the plan is fully validated before the thread starts; the move is slow (half the configured joint
-speed for the free move, ~20 mm/s on the straight line); Motion's following-error check stops on collisions;
+Safety: the plan is fully validated before the thread starts; moves are slow (free moves at half the configured
+joint speed, straight lines at their planned mm/s); Motion's following-error check stops on collisions;
 `stop()` halts at the next control tick and holds position. If the motors were off (calibrating), they are
 turned on at the current pose first — the caller's confirmation must say so.
 """
@@ -14,11 +16,10 @@ import time
 from typing import Callable
 
 from ..motion.controller import Motion, MotionError
+from ..motion.program import JointMove, run
 from ..poses import PoseStore
-from ..tray.goto import GotoPlan
 
 log = logging.getLogger(__name__)
-LINE_SPEED_M_S = 0.02
 
 
 class Stopped(MotionError):
@@ -61,7 +62,7 @@ class GotoRunner:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, plan: GotoPlan) -> None:
+    def start(self, plan) -> None:
         if self.running:
             raise RuntimeError("a move is already running")
         self._stop.clear()
@@ -79,8 +80,9 @@ class GotoRunner:
         if self._thread:
             self._thread.join(timeout)
 
-    def _run(self, plan: GotoPlan) -> None:
-        name = f"{plan.point} (+{plan.standoff_mm:.1f} mm along the normal)"
+    def _run(self, plan) -> None:
+        name = plan.label
+        target = plan.summary().get("point") or plan.summary().get("pocket")
         try:
             with self.hub.borrow(mode="moving", allow=("idle", "calibrating")) as arm:
                 if not arm.torque:  # motors were off for calibration: hold where it is first
@@ -92,20 +94,22 @@ class GotoRunner:
                 # feed-forward (real arm only); Motion adds velocity feed-forward + at-rest sag learning itself
                 motion = Motion(stoppable, PoseStore(self.cfg.poses_file), self.cfg.motion, self.cfg.gripper,
                                 sleep=self.sleep, log=log.info, gravity=getattr(self.hub, "gravity", None))
-                self.record("robot", f"Moving to {name}", point=plan.point)
-                motion.move_to(plan.approach_pose, speed=self.cfg.motion.speed / 2)
-                motion.follow(plan.path, max(1.0, plan.line_mm / 1000 / LINE_SPEED_M_S), name)
+                self.record("robot", f"Starting: {name}", point=target)
+                slow = self.cfg.motion.speed / 2
+                steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s
+                         for s in plan.steps]
+                run(steps, motion, on_step=lambda s: self.last.update(step=s.label))
             self.last["status"] = "done"
-            self.record("robot", f"Arrived at {name}; holding", point=plan.point, tilt_deg=round(plan.tilt_deg, 1))
+            self.record("robot", f"Done: {name}; holding", point=target, tilt_deg=round(plan.tilt_deg, 1))
         except Stopped:
             self._hold()
             self.last["status"] = "stopped"
-            self.record("robot", f"Go-to {plan.point} stopped by the user; holding position", point=plan.point)
-        except Exception as e:  # noqa: BLE001 — MotionError, ArmBusy, bus errors: report, hold
+            self.record("robot", f"{name} stopped by the user; holding position", point=target)
+        except Exception as e:  # noqa: BLE001 — MotionError, GraspError, ArmBusy, bus errors: report, hold
             self._hold()
             self.last.update(status="failed", error=str(e))
-            self.record("error", f"Go-to {plan.point} failed: {e}", point=plan.point)
-            log.exception("go-to failed")
+            self.record("error", f"{name} failed: {e}", point=target)
+            log.exception("arm program failed")
 
     def _hold(self) -> None:
         try:

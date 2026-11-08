@@ -11,6 +11,18 @@ interface GotoReply {
   started: boolean;
 }
 
+/** Server reply of POST /api/arm/pick (packing/tray/pick.py summary). */
+interface PickReply {
+  plan: {
+    pocket: string; sku: string; pitch_deg: number; tilt_deg: number; pull_mm: number; lift_mm: number;
+    grasp_standoff_mm: number; travel_units: number; pull_twist_deg: number; jaw_off_deg: number;
+    steps: { step: string; label: string }[];
+  };
+  calibration: string;
+  motors_will_turn_on: boolean;
+  started: boolean;
+}
+
 const INCH_MM = 25.4;
 
 /**
@@ -24,7 +36,8 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
   const [point, setPoint] = useState("corner_bl");
   const [standoffIn, setStandoffIn] = useState(0.5);
   const [plan, setPlan] = useState<GotoReply | null>(null);
-  const [busy, setBusy] = useState<"plan" | "go" | "stop" | "release" | null>(null);
+  const [pick, setPick] = useState<PickReply | null>(null);
+  const [busy, setBusy] = useState<"plan" | "go" | "pick" | "stop" | "release" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRelease, setConfirmRelease] = useState(false);
 
@@ -57,6 +70,32 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
     await act<GotoReply>("go", "/api/arm/goto", { point, standoff_mm: standoffIn * INCH_MM, confirm_move: true });
   }
 
+  const isPocket = (tray?.pockets ?? []).some((pk) => pk.id === point);
+
+  async function planPick() {
+    setTarget(point);
+    const r = await act<PickReply>("pick", "/api/arm/pick", { pocket: point });
+    if (r) setPick(r);
+  }
+
+  async function goPick() {
+    setPick(null);
+    await act<PickReply>("go", "/api/arm/pick", { pocket: point, confirm_move: true });
+  }
+
+  const k = pick?.plan;
+  const pickBody = k
+    ? `Test pick of the ${k.sku} in ${k.pocket}: open the gripper, free move (largest joint change ` +
+      `${k.travel_units.toFixed(0)} units) to the approach point, slowly straight in to ` +
+      `${k.grasp_standoff_mm.toFixed(1)} mm off the tray face, grip, pull straight out ${k.pull_mm.toFixed(0)} mm ` +
+      `along the normal, lift ${k.lift_mm.toFixed(0)} mm and hold the part there. ` +
+      `Tool pitched ${k.pitch_deg.toFixed(0)}° down (${k.tilt_deg.toFixed(0)}° off the normal), ` +
+      `turns ${k.pull_twist_deg.toFixed(0)}° during the pull, jaws ${k.jaw_off_deg.toFixed(0)}° off the grip direction. ` +
+      `A missed grip opens and backs out. Uses the ${pick!.calibration}. Inventory is not changed.` +
+      (pick!.motors_will_turn_on ? " The motors are off: they turn ON first and hold the arm where it is." : "") +
+      " Keep the area clear; press Stop to halt."
+    : "";
+
   const p = plan?.plan;
   const confirmBody = p
     ? `The arm will move to ${label(p.point)}: first a free move (largest joint change ${p.travel_units.toFixed(0)} units) ` +
@@ -70,8 +109,9 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
 
   return (
     <section className="goto" aria-labelledby="goto-h">
-      <h3 id="goto-h">Go to point (preview)</h3>
-      <p className="sub">Moves the tip just off a corner or pocket, pointing into the tray — to check the calibration.</p>
+      <h3 id="goto-h">Go to point / pick test</h3>
+      <p className="sub">Go to: tip just off a corner or pocket, pointing into the tray (checks the calibration).
+        Pick test: grip the part in a pocket, pull it straight out, lift and hold.</p>
       <div className="goto-row">
         <select aria-label="Point to go to" value={point} disabled={moving}
                 onChange={(e) => { setPoint(e.target.value); setTarget(e.target.value); }}>
@@ -96,8 +136,14 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
             {busy === "plan" ? "Planning…" : "Go to…"}
           </button>
         )}
+        {!moving && (
+          <button type="button" className="act" disabled={!canPlan || !isPocket || busy !== null} onClick={planPick}
+                  title={isPocket ? "Plan a test pick from this pocket, then confirm" : "Choose a pocket"}>
+            {busy === "pick" ? "Planning…" : "Pick test…"}
+          </button>
+        )}
       </div>
-      {moving && <p className="moving-note">Arm moving to {label(point)}…</p>}
+      {moving && <p className="moving-note">Arm moving ({label(point)})…</p>}
       {session.active && arm?.torque && !moving && (
         <button type="button" className="linkish" onClick={() => setConfirmRelease(true)}>
           Motors off again to keep capturing (hold the arm)
@@ -109,6 +155,11 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
         <ConfirmDialog title={`Move the arm to ${label(plan.plan.point)}?`} body={confirmBody}
                        confirmLabel={plan.motors_will_turn_on ? "Turn motors on and move" : "Move the arm"}
                        onCancel={() => setPlan(null)} onConfirm={go} />
+      )}
+      {pick && (
+        <ConfirmDialog title={`Test pick from ${pick.plan.pocket}?`} body={pickBody}
+                       confirmLabel={pick.motors_will_turn_on ? "Turn motors on and pick" : "Pick"}
+                       onCancel={() => setPick(null)} onConfirm={goPick} />
       )}
       {confirmRelease && (
         <ConfirmDialog title="Turn the motors off?" body="Hold the arm — motors will turn OFF and it will drop."

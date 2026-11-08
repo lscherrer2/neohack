@@ -23,6 +23,7 @@ from ..motion.kinematics import ArmModel, PathError
 INCH_MM = 25.4
 MAX_IK_ERR_M = 0.002
 JOINT_LIMIT = 100.0
+LINE_SPEED_MM_S = 20.0  # straight line in, slow
 
 
 @dataclass
@@ -36,6 +37,18 @@ class GotoPlan:
     tilt_deg: float  # angle between the tool axis and the tray's inward normal (5-DOF limit)
     travel_units: float  # largest joint change of the free move (calibrated units)
     line_mm: float
+
+    @property
+    def label(self) -> str:
+        return f"go to {self.point} (+{self.standoff_mm:.1f} mm along the normal)"
+
+    @property
+    def steps(self) -> list:
+        """As a motion program: slow free move to the approach point, then the straight line in."""
+        from ..motion.program import JointMove, LineMove
+
+        return [JointMove(self.approach_pose, None, f"free move to {self.approach_mm:.0f} mm out"),
+                LineMove(self.path, self.line_mm, LINE_SPEED_MM_S, f"line in to {self.standoff_mm:.1f} mm")]
 
     def summary(self) -> dict:
         return {"point": self.point, "point_robot_m": self.point_robot_m, "standoff_mm": self.standoff_mm,

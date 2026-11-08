@@ -32,6 +32,7 @@ class TrayType:
     size: list[float]  # circle: [diameter]; rect: [w, h]; pin_pair: [pin diameter]
     spacing: float | None = None  # pin_pair: center distance between the two pins
     grip_axis: str = "x"  # tray-frame axis the gripper fingers close along (before pocket yaw)
+    min_grip: float | None = None  # gripper units; closing tighter = missed/dropped (None = gripper.min_part_width)
 
     def __post_init__(self) -> None:
         if self.feature not in FEATURES:

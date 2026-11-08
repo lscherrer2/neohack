@@ -56,6 +56,12 @@ class TrayCfg:
     protrusion_mm: float = 10.0  # how far every item sticks out of the tray face
     extract_mm: float = 120.0  # pull straight out along the tray normal at least this far
     approach_mm: float = 30.0  # stand-off above the item top before the final straight approach
+    # picking (packing/tray/pick.py)
+    grasp_standoff_mm: float = 3.81  # tool tip off the tray face when the gripper closes (0.15 in)
+    pull_mm: float = 150.0  # preferred straight pull-out along the normal (>= extract_mm)
+    lift_mm: float = 100.0  # then straight up this far
+    max_pitch_deg: float = 40.0  # tool may pitch down up to this to fit the pull-out (smallest that fits wins)
+    pitch_step_deg: float = 10.0
     _layout: TrayLayout | None = field(default=None, repr=False, compare=False)
 
     def layout(self) -> TrayLayout:
@@ -165,4 +171,9 @@ def _load_tray(raw: dict | None, rel) -> TrayCfg | None:
         protrusion_mm=float(raw.get("protrusion_mm", 10.0)),
         extract_mm=float(raw.get("extract_mm", 120.0)),
         approach_mm=float(raw.get("approach_mm", 30.0)),
+        grasp_standoff_mm=float(raw.get("grasp_standoff_mm", 3.81)),
+        pull_mm=float(raw.get("pull_mm", 150.0)),
+        lift_mm=float(raw.get("lift_mm", 100.0)),
+        max_pitch_deg=float(raw.get("max_pitch_deg", 40.0)),
+        pitch_step_deg=float(raw.get("pitch_step_deg", 10.0)),
     )

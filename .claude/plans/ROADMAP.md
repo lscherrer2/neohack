@@ -60,16 +60,18 @@ The system is a stack: each layer only works if the ones under it do. Status per
   compensation, stall-detect grip (`grip(min_width)`).
 - ✅ Go-to preview (`tray/goto.py` + `shop/goto_runner.py`): plan, validate, confirm, slow move, Stop. The tool
   points along the tray normal as closely as 5-DOF allows. User checked it visually on the real arm.
+- ✅ Motion programs (`motion/program.py`, 2026-11-07): validated step lists (joint move, line, open, grip,
+  check holding; `on_fail` recovery); go-to and pick both run through them.
+- ✅ Approach → grip → extract primitive with wrist roll from the grip axis and per-type `min_grip`
+  (`tray/pick.py`, plan `tray_pick.md`). Sim only so far.
 - **Missing:**
-  - An "approach along the normal → grip → extract along the normal" primitive (the go-to plan is half of it).
-  - Wrist roll set from the pocket's grip axis: fingers left↔right for most items, up↔down for the breadboard.
-  - Per-item grip widths: `grip_width` isn't in the config yet. The breadboard is 2.5 mm, below the global
-    `min_part_width` of 3.
   - Collision awareness. Today it's only "approach from the normal, stand-off first"; nothing knows about
     neighboring items or the tray edge.
 
-### 5. Manipulation procedures 🔴 ← **next big piece**
-- 🔴 **Pick from a pocket:**
+### 5. Manipulation procedures 🟡 ← **next big piece**
+- 🟡 **Pick test from a pocket** planned + runnable from the dashboard (2026-11-07, `tray_pick.md`): all 33
+  pockets plan on the real calibration with the tool pitched 20–40° down (a level tool can't pull 12 cm).
+  Not yet run on the real arm; no inventory change yet. Original outline:
   1. Approach to a stand-off out along the normal, gripper open, wrist roll per grip axis.
   2. Straight line in to the grasp depth (items stick out 10 mm).
   3. Close with stall detection; check the width against the item's `grip_width`.
@@ -132,7 +134,7 @@ The system is a stack: each layer only works if the ones under it do. Status per
   - Secrets handling (keys in `.env.local`, never printed).
 
 ### Cross-cutting
-- **Tests:** 82 sim tests (`.venv/bin/python -m unittest discover -s packing/tests -t .`). New manipulation code
+- **Tests:** 100 sim tests (`.venv/bin/python -m unittest discover -s packing/tests -t .`). New manipulation code
   needs FakeArm tests first (plan validation, inventory transitions, failure paths), then supervised hardware runs.
 - **Repo:** `tray-core` and the remote `main` were merged into `main` (2026-11-07). Work on `main` or short
   feature branches from here. `.zed/settings.json` (editor settings) came in from `main`.

@@ -129,6 +129,11 @@ class GotoIn(BaseModel):
     standoff_mm: float = Field(12.7, ge=5.0, le=100.0)  # distance out along the tray normal
 
 
+class PickIn(BaseModel):
+    pocket: str  # tray pocket id, e.g. aa_1
+    confirm_move: bool = False  # False = plan only (dry run), True = move
+
+
 class ModeIn(BaseModel):
     mode: str  # corners | pockets
 
@@ -428,6 +433,41 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
                 plan = plan_goto(h.model, body.point, cal.to_robot(*xy), cal.normal, joints, standoff_mm=body.standoff_mm)
         except PathError as e:
             raise HTTPException(422, f"can't plan that move: {e}") from e
+        out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
+               "started": False}
+        if body.confirm_move:
+            _runner().start(plan)
+            out["started"] = True
+        return out
+
+    @app.post("/api/arm/pick")
+    def arm_pick(body: PickIn):
+        """Test pick (packing/tray/pick.py): approach along the normal, grip, pull straight out, lift, hold.
+        Dry run unless confirm_move. Doesn't touch inventory (a test; the drop spot isn't defined yet)."""
+        from ..motion.kinematics import PathError
+        from ..tray.pick import plan_pocket_pick
+
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; wait for it to finish")
+        if h.model is None:
+            raise HTTPException(503, "kinematics unavailable (placo not installed?)")
+        cal, source = _goto_calibration()
+        tray = _tray()
+        try:
+            tray.layout().pocket(body.pocket)
+        except KeyError as e:
+            raise HTTPException(404, f"no pocket {body.pocket}") from e
+        joints = h.state()["joints"]
+        if not joints:
+            raise HTTPException(409, "no arm reading yet")
+        try:
+            with h._lock:
+                plan = plan_pocket_pick(h.model, tray, shelf.cfg.gripper, cal, body.pocket, joints)
+        except PathError as e:
+            raise HTTPException(422, f"can't plan that pick: {e}") from e
         out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
                "started": False}
         if body.confirm_move:
