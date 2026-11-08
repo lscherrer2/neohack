@@ -40,7 +40,7 @@ export default function BoxesBox({ arm, boxes, apply }: {
       <div className="cal-body">
         <p className="instr sub">
           Put the empty boxes on the <strong>left</strong> of the arm, tabs pointing at the arm's swivel, box centers at
-          least <strong>30 cm from the swivel</strong> (closer, the arm can't hold the gripper level at the tab) and
+          least <strong>31 cm from the swivel</strong> (closer, the arm can't hold the gripper level at the tab) and
           ≥ 12 cm apart. For each box: release the motors (hold the arm), hold the gripper <strong>level</strong>,
           pointing along the tab toward the box, close the jaws up/down on the tab near the wall, then press
           <strong>Add box</strong>.

@@ -118,6 +118,16 @@ def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float, lif
     return worst
 
 
+def too_close(T_box: np.ndarray, pan_xy: np.ndarray, cfg) -> str | None:
+    """Plain-language reason if a box at T_box is too close to the swivel for the level tab grip, else None."""
+    r = float(np.linalg.norm(T_box[:2, 3] - pan_xy))
+    need = cfg.boxes.min_center_mm / 1000
+    if r >= need:
+        return None
+    return (f"is {r * 100:.1f} cm from the arm's swivel; it needs ≥ {need * 100:.1f} cm (closer, the arm can't come in "
+            f"/ back out level along the tab) — slide it {(need - r) * 100 + 0.5:.0f} cm further out")
+
+
 def _level(v: np.ndarray) -> np.ndarray:
     """Horizontal part of a direction, normalized (come in / back out level along the tab)."""
     h = np.array([v[0], v[1], 0.0])
@@ -132,6 +142,9 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     pan_xy = model.pan_xy
     obstacles = obstacles or []
     T_land_box = box_pose(box, dst, cfg, pan_xy)
+    for where in (src, dst):
+        if why := too_close(box_pose(box, where, cfg, pan_xy), pan_xy, cfg):
+            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(where, where)} {why}, then remove and re-add it")
     for ob in obstacles:
         if blocks_intersect(box_block(T_land_box), ob, 0.0025):
             raise PathError(f"box {box.id} at {LOCATION_NAMES.get(dst, dst)} would overlap {ob.name}")

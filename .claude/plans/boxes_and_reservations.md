@@ -92,3 +92,10 @@ lift `carry_mm` (30) first, then 60/100/140/180/220 mm until the carry clears; l
 are 3D too. Reach (sim): a level grip reaches tool heights up to ~33 cm at grip radii 26–30 cm, so the box bottom
 can go ~25 cm above the desk.
 
+### Change 2026-11-07 (later): minimum box distance
+User hit "back out level along the tab: joint limit at 88% of the line". Sim: box centers at 30.4 cm+ from the
+swivel work, 30.2 cm and closer fail (the in-front/back-out point is 22 mm nearer the arm, inside the band where
+the arm can't reach at tab height at all — loosening orientation doesn't help; a shorter back-out would drag the
+box: fingertips 6 mm past the grip point + ~15 mm of tab toward the arm). Now `boxes.min_center_mm` 305: Add box
+refuses closer boxes and box moves fail early with "slide it N cm further out, then remove and re-add it".
+

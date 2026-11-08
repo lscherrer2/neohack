@@ -110,6 +110,8 @@ class BoxesCfg:
     # tab grip (gripper pointing away along the tab) only reaches with the grip point >= ~25 cm from the swivel
     # -> box centers >= ~30 cm out (345: grip point at 26 cm). Further out, drops over the box get unreachable
     carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging, clears neighbours)
+    min_center_mm: float = 305.0  # box center at least this far from the swivel: closer, the level approach /
+    # back-out along the tab runs into the arm's reach limit (sim: 304 ok, 302 fails)
     approach_mm: float = 22.0  # open jaws come in level along the tab from this far back (and back out after):
     # clears the tab tip (~15 mm behind the grip point + jaw tips); longer runs below the ~25 cm level-grip limit
     line_speed_mm_s: float = 25.0  # straight moves with / near a box

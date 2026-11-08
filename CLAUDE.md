@@ -155,7 +155,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   restock → `fill_short`. **Locked**: units of a `packing` order can't be changed from the dashboard (409; bulk fill
   skips them). Tray API: `reserved_by`, `locked`; orders carry `slots`. Sim packing consumes exactly those units.
 - **Boxes + full order packing** (plan `.claude/plans/boxes_and_reservations.md`, code `packing/boxes/`, sim-tested,
-  not run on hardware): supply boxes on the LEFT, tab facing the swivel, box centers **≥ ~30 cm from the swivel**
+  not run on hardware): supply boxes on the LEFT, tab facing the swivel, box centers **≥ 30.5 cm from the swivel** (`boxes.min_center_mm`;
+  Add box refuses closer — the 22 mm level approach/back-out along the tab can't be reached there)
   and ≥ 12 cm apart. **Grip is horizontal**: gripper level, pointing away from the arm along the tab, jaws closing
   up/down on the 2 mm tab plate (fixed jaw under the plate = wrist roll ≈ 0; on top needs roll ~180°, past its
   limit). A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that

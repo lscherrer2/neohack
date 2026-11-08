@@ -596,7 +596,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     from ..boxes.geometry import (BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, blocks_intersect, box_block,
                                   box_from_grasp)
     from ..boxes.geometry import obstacles as box_obstacles
-    from ..boxes.move import box_pose, plan_box_move
+    from ..boxes.move import box_pose, plan_box_move, too_close
     from ..boxes.store import BoxError, BoxStore
 
     boxes = BoxStore(store)
@@ -658,6 +658,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409 if isinstance(e, ArmBusy) else 422, str(e)) from e
         if T_box[1, 3] < pan[1]:
             raise HTTPException(422, "that box is on the right of the arm — supply boxes go on the LEFT")
+        if why := too_close(T_box, pan, cfg):
+            raise HTTPException(422, f"that box {why}")
         for ob in _obstacles(pan):  # 3D: a box may sit under the tray's overhang, not inside it
             if blocks_intersect(box_block(T_box), ob, 0.0025):
                 raise HTTPException(422, f"that box would overlap {ob.name} — is it already calibrated?")

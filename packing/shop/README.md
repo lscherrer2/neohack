@@ -72,7 +72,7 @@ pocket marked empty moves its reservation to another free unit (or the order sho
 being packed are locked on the dashboard. Tray map: ring + `#order`; orders table: "Reserved: aa_1, …".
 
 ## Boxes and packing on the arm (`--robot`)
-Calibration tab → **Packing boxes**: put empty boxes on the LEFT (tabs toward the arm's swivel, centers ≥ 30 cm from
+Calibration tab → **Packing boxes**: put empty boxes on the LEFT (tabs toward the arm's swivel, centers ≥ 31 cm from
 the swivel and ≥ 12 cm apart), release the motors, hold the gripper level along a tab and close the jaws up/down on
 it, **Add box**. Clicking **Action**
 then packs the order on the real arm (`packing/boxes/packer.py`): box → pack spot (middle), each reserved part from

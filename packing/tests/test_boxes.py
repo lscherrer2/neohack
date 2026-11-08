@@ -170,8 +170,13 @@ class PlanTests(unittest.TestCase):
             plan_box_move(MODEL, box, "supply", "pack", HOME, self.cfg, [blocker])
         self.assertIn("overlap box 2", str(e.exception))
         near = make_box(0.22, 0.17)  # tab grip point < 25 cm from the swivel: the level grip can't reach it
-        with self.assertRaises(PathError):
+        with self.assertRaises(PathError) as e:
             plan_box_move(MODEL, near, "supply", "pack", HOME, self.cfg)
+        self.assertIn("further out", str(e.exception))  # says plainly what to do
+        edge = make_box(PAN[0] + 0.30 * np.cos(0.6), PAN[1] + 0.30 * np.sin(0.6))  # 30 cm: just inside the limit
+        with self.assertRaises(PathError) as e:
+            plan_box_move(MODEL, edge, "supply", "pack", HOME, self.cfg)
+        self.assertIn("slide it 1 cm further out", str(e.exception))
 
 
 class ApiTests(unittest.TestCase):
@@ -208,6 +213,10 @@ class ApiTests(unittest.TestCase):
         b = r.json()["boxes"][0]
         np.testing.assert_allclose(np.array(b["pose"])[:2, 3], [0.32, 0.16], atol=0.003)
         self.assertEqual(self.http.post("/api/boxes/capture").status_code, 422)  # same box again: overlap
+        self.pose_at_tab(PAN[0] + 0.29 * np.cos(0.6), PAN[1] + 0.29 * np.sin(0.6))  # 29 cm out: too close
+        r = self.http.post("/api/boxes/capture")
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("further out", r.json()["detail"])
         self.pose_at_tab(0.32, -0.16)
         r = self.http.post("/api/boxes/capture")
         self.assertIn("LEFT", r.json()["detail"])
