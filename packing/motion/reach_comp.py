@@ -28,7 +28,6 @@ import numpy as np
 from ..joints import BODY
 
 MAX_IK_ERR_M = 0.002  # a raised pose must be reached this closely, else the run is refused before moving
-ORIENTATION_WEIGHT = 0.5  # keep the tool orientation (a level box grip stays level) while raising
 
 
 @dataclass
@@ -86,6 +85,60 @@ def lift_m(model, rc: ReachComp, r: float) -> float:
     return rc.lift_mm / 1000 * (max(r, 0.0) / ref) ** rc.power
 
 
+PLANAR = ("shoulder_lift", "elbow_flex", "wrist_flex")  # pan and roll stay: a pure lift keeps the arm's plane
+
+
+MAX_TILT_CHANGE_DEG = 5.0  # near a singularity the tool may tilt a little to reach the raised point; more = refused
+TILT_WEIGHTS = (0.05, 0.005)  # m per unit of rotation-matrix difference: tilt held firmly first; if that can't
+# reach the point (near a singularity), position first and tilt second (~0.1 mm per degree)
+TILT_WEIGHT = TILT_WEIGHTS[-1]
+
+
+def _tilt_change_deg(R0: np.ndarray, R1: np.ndarray) -> float:
+    return float(np.degrees(np.arccos(np.clip((np.trace(R0.T @ R1) - 1) / 2, -1.0, 1.0))))
+
+
+def _raise_planar(model, body: dict, T: np.ndarray, target: np.ndarray, iters: int = 60,
+                  tilt_weight: float = TILT_WEIGHT) -> tuple[dict, float, float]:
+    """Raise the tool point with lift/elbow/wrist only (pan and roll unchanged): damped least squares on FK.
+    Position must be hit; the tool tilt is kept as well as possible (soft). Away from singularities both are met
+    exactly. Near full stretch all three joints tilt the tool alike, so keeping the tilt EXACTLY makes a few mm
+    straight up impossible — the old orientation-weighted placo IK stalled 2-10 mm short there and the run was
+    refused as "out of reach". Returns (pose, tip error m, tilt change deg)."""
+    R0 = T[:3, :3]
+    q = dict(body)
+
+    def residual(p):
+        F = model.fk(p)
+        return np.concatenate([F[:3, 3] - target, tilt_weight * (F[:3, :3] - R0).ravel()])
+
+    h, lam = 0.02, 1e-6  # finite-difference step (units); LM damping
+    r = residual(q)
+    cost = float(r @ r)
+    for _ in range(iters):
+        if cost < 1e-10:
+            break
+        J = np.empty((r.size, len(PLANAR)))
+        for i, j in enumerate(PLANAR):
+            J[:, i] = (residual({**q, j: q[j] + h}) - r) / h
+        A, g = J.T @ J, J.T @ r
+        step = -np.linalg.solve(A + lam * np.eye(len(PLANAR)), g)
+        step = np.clip(step, -5.0, 5.0)  # units per iteration: no wild jumps
+        if np.abs(step).max() < 1e-5:
+            break
+        # stay inside the joint limits: a joint at its limit stops there and the other two make up the rest
+        trial = {**q, **{j: float(np.clip(q[j] + s, -100.0, 100.0)) for j, s in zip(PLANAR, step)}}
+        rt = residual(trial)
+        if float(rt @ rt) < cost:
+            q, r, cost, lam = trial, rt, float(rt @ rt), max(lam / 3, 1e-9)
+        else:
+            lam *= 10
+            if lam > 1e3:
+                break
+    F = model.fk(q)
+    return q, float(np.linalg.norm(F[:3, 3] - target)), _tilt_change_deg(R0, F[:3, :3])
+
+
 def raise_pose(model, rc: ReachComp, q: dict) -> dict:
     """Joint pose whose tool point is lift(r) higher than q's (same orientation). ValueError if unreachable."""
     body = {j: float(q[j]) for j in BODY}
@@ -95,10 +148,16 @@ def raise_pose(model, rc: ReachComp, q: dict) -> dict:
         return dict(q)
     target = T.copy()
     target[2, 3] += dz
-    raised, err = model.ik(body, target, orientation_weight=ORIENTATION_WEIGHT)
-    if err > MAX_IK_ERR_M or any(abs(v) > 100 for v in raised.values()):
+    for w in TILT_WEIGHTS:
+        raised, err, tilt = _raise_planar(model, body, T, target[:3, 3], tilt_weight=w)
+        if err <= MAX_IK_ERR_M / 4:
+            break
+    over = max(abs(v) for v in raised.values()) > 100
+    if err > MAX_IK_ERR_M or over or tilt > MAX_TILT_CHANGE_DEG:
+        why = ("a joint would pass its limit" if over else
+               f"the tool would have to tilt {tilt:.0f}°" if err <= MAX_IK_ERR_M else f"IK {err * 1000:.1f} mm off")
         raise ValueError(f"reach compensation: can't aim {dz * 1000:.0f} mm higher at "
-                         f"{np.round(T[:3, 3] * 1000).tolist()} mm (out of reach) — turn it off or lower it")
+                         f"{np.round(T[:3, 3] * 1000).tolist()} mm ({why}) — turn it off or lower it")
     return {**q, **raised}
 
 

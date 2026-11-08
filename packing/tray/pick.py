@@ -48,6 +48,7 @@ class PickSettings:
     grip_mm: float = 0.0  # part width between the jaws
     open_value: float | None = None  # gripper value to open to (part width + margin); None = fully open
     fixed_jaw_offset_mm: float = 0.0  # tool point -> part center, toward the moving jaw (see FIXED_JAW_FACE_MM)
+    fixed_jaw_side: str | None = None  # "+" / "-": fixed jaw only on that side along the grip axis (None = either)
     protrusion_mm: float = 10.0
     approach_mm: float = 30.0  # approach point = protrusion + this, out from the face
     grasp_standoff_mm: float = 3.81  # tool tip off the tray face when it closes (0.15 in)
@@ -62,10 +63,12 @@ class PickSettings:
         t = next((t for t in tray_cfg.types if t.sku == sku), None)
         if t is None:
             raise KeyError(f"no tray type {sku!r}")
+        margin = gripper_cfg.open_margin_mm if t.open_margin_mm is None else t.open_margin_mm
         return cls(grip_axis=t.grip_axis,
                    min_grip=t.min_grip if t.min_grip is not None else gripper_cfg.min_part_width,
-                   grip_mm=t.grip_width_mm, open_value=round(gripper_cfg.open_for(t.grip_width_mm), 1),
-                   fixed_jaw_offset_mm=FIXED_JAW_FACE_MM + t.grip_width_mm / 2 + gripper_cfg.open_margin_mm / 2,
+                   grip_mm=t.grip_width_mm, open_value=round(gripper_cfg.open_for(t.grip_width_mm, margin), 1),
+                   fixed_jaw_offset_mm=FIXED_JAW_FACE_MM + t.grip_width_mm / 2 + margin / 2,
+                   fixed_jaw_side=t.fixed_jaw_side,
                    protrusion_mm=tray_cfg.protrusion_mm, approach_mm=tray_cfg.approach_mm,
                    grasp_standoff_mm=tray_cfg.grasp_standoff_mm,
                    # pull-out per part: what it takes to clear its socket (length − what sticks out + margin), with
@@ -208,9 +211,10 @@ def plan_pick(model: ArmModel, pocket: str, sku: str, point_m: np.ndarray, norma
     for pull in pulls:
         for pitch in pitches:
             # the fixed jaw can be on either side of the part (wrist roll 180° apart): plan both, keep the one
-            # whose wrist roll is nearest mid-range
+            # whose wrist roll is nearest mid-range — unless the type pins the side (close neighbour on the other)
             plans = []
-            for jaw_x in (close_dir, -close_dir):
+            sides = {None: (close_dir, -close_dir), "+": (close_dir,), "-": (-close_dir,)}[s.fixed_jaw_side]
+            for jaw_x in sides:
                 try:
                     plans.append(_plan_one(model, pocket, sku, c, n, jaw_x, current, s, float(pitch), pull))
                 except PathError as e:

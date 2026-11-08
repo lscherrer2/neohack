@@ -61,6 +61,20 @@ class CurveTests(unittest.TestCase):
         self.assertGreater(MODEL.tip(out[2].on_fail[0].pose)[2], MODEL.tip(Q)[2] + 0.004)
         self.assertEqual(steps[0].pose, Q)  # the plan itself is untouched
 
+    def test_sleep_and_near_stretch_poses_are_raised(self):
+        # Regression (2026-11-07): the sleep pose (gripper straight up) and stretched-out poses are near a singularity;
+        # the old orientation-weighted placo IK stalled 1-3 mm short there and refused every pick test as "out of reach".
+        from packing.poses import DEFAULTS
+
+        rc = ReachComp(enabled=True)  # default 6 mm
+        for q in (DEFAULTS["sleep"], {"shoulder_pan": 0.0, "shoulder_lift": -54.0, "elbow_flex": -74.0,
+                                      "wrist_flex": 14.0, "wrist_roll": 0.0}):
+            T0 = MODEL.fk(q)
+            T1 = MODEL.fk(raise_pose(MODEL, rc, q))
+            dz = lift_m(MODEL, rc, radius(MODEL, T0[:3, 3]))
+            self.assertLess(np.linalg.norm(T1[:3, 3] - T0[:3, 3] - [0, 0, dz]), rc_mod.MAX_IK_ERR_M)
+            self.assertLess(rc_mod._tilt_change_deg(T0[:3, :3], T1[:3, :3]), rc_mod.MAX_TILT_CHANGE_DEG)
+
     def test_out_of_reach_is_refused(self):
         with self.assertRaisesRegex(ValueError, "reach compensation"):
             raise_pose(MODEL, dataclasses.replace(ON, lift_mm=400.0), Q)  # 30+ cm up from a far pose

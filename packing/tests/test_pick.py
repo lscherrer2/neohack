@@ -81,6 +81,11 @@ class PickPlanTests(unittest.TestCase):
     def plan(self, pocket):
         return plan_pocket_pick(MODEL, self.cfg.tray, self.cfg.gripper, self.cal, pocket, HOME)
 
+    def margin(self, pocket):
+        sku = self.cfg.tray.layout().pocket(pocket).sku
+        m = next(t.open_margin_mm for t in self.cfg.tray.types if t.sku == sku)
+        return self.cfg.gripper.open_margin_mm if m is None else m
+
     def test_program_shape_and_geometry(self):
         t, n = self.cfg.tray, self.cal.normal
         for pocket in ("aa_1", "glue_8", "breadboard_3"):
@@ -105,7 +110,7 @@ class PickPlanTests(unittest.TestCase):
                 side /= np.linalg.norm(side)
                 aim = c + n * t.grasp_standoff_mm / 1000 + side * plan.side_offset_mm / 1000
                 self.assertLess(np.linalg.norm(g - aim) * 1000, 2.0)
-                self.assertAlmostEqual(plan.side_offset_mm, plan.grip_mm / 2 + self.cfg.gripper.open_margin_mm / 2)
+                self.assertAlmostEqual(plan.side_offset_mm, plan.grip_mm / 2 + self.margin(pocket) / 2)
                 self.assertLess(float((c - g) @ x), 0)  # part center is on the moving jaw's side (-x)
                 # jaws close along the type's grip direction (tool x), up to the 5-DOF tilt
                 # (pitching down turns about the sideways jaw axis: sideways grips stay aligned; the breadboard's
@@ -138,8 +143,18 @@ class PickPlanTests(unittest.TestCase):
             self.assertLess(plan.open_value, g.open / 2)  # far less than fully open
             # fingertip gap at that opening = width + margin (chord of the jaw swing)
             gap = 2 * g.jaw_length_mm * np.sin(np.radians(plan.open_value * g.deg_per_unit) / 2)
-            self.assertAlmostEqual(gap, width + g.open_margin_mm, delta=0.3)
+            self.assertAlmostEqual(gap, width + self.margin(pocket), delta=0.3)
         self.assertEqual(GripperCfg(open=30).open_for(500), 30)  # capped at fully open
+
+    def test_glue_tight_with_fixed_jaw_away_from_breadboards(self):
+        # breadboards sit ~12 mm to the glue's right (+x): small opening, fixed jaw pinned to the left (-x), so
+        # only the moving jaw goes in between, 2 mm off the stick
+        self.assertEqual(self.margin("glue_3"), 4)
+        x_tray = self.cal.dir_to_robot(1.0, 0.0)
+        for pocket in ("glue_1", "glue_4", "glue_8"):
+            plan = self.plan(pocket)
+            self.assertLess(float(MODEL.fk(plan.steps[2].path[-1])[:3, 0] @ x_tray), -0.8)
+            self.assertAlmostEqual(plan.side_offset_mm, 12.5 / 2 + 2)
 
     def test_breadboard_grips_vertically_others_sideways(self):
         jaw = lambda plan: MODEL.fk(plan.steps[2].path[-1])[:3, 0]  # noqa: E731

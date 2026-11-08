@@ -35,12 +35,22 @@ class TrayType:
     min_grip: float | None = None  # gripper units; closing tighter = missed/dropped (None = gripper.min_part_width)
     grip_mm: float | None = None  # part width between the jaws; None = from the feature (circle Ø / rect side)
     length_mm: float = 60.0  # how far the part sticks out past the jaws once picked (drop height into a box)
+    open_margin_mm: float | None = None  # extra opening beyond grip_mm, both sides together (None = gripper's)
+    # which tray side (along grip_axis) the FIXED jaw goes on: "-" / "+" (None = either, roll nearest mid-range).
+    # Pin it to keep a jaw off a close neighbour (glue: fixed jaw on -x, away from the breadboards on +x).
+    fixed_jaw_side: str | None = None
 
     def __post_init__(self) -> None:
         if self.feature not in FEATURES:
             raise ValueError(f"tray type {self.sku}: feature must be one of {FEATURES}, not {self.feature!r}")
         if self.grip_axis not in ("x", "y"):
             raise ValueError(f"tray type {self.sku}: grip_axis must be x or y")
+        if self.fixed_jaw_side is not None:
+            side = str(self.fixed_jaw_side)
+            self.fixed_jaw_side = side[0] if side in ("-", "+", "-" + self.grip_axis, "+" + self.grip_axis) else side
+            if self.fixed_jaw_side not in ("-", "+"):
+                raise ValueError(f"tray type {self.sku}: fixed_jaw_side must be - or + (or -{self.grip_axis} / "
+                                 f"+{self.grip_axis})")
         need = {"circle": 1, "rect": 2, "pin_pair": 1}[self.feature]
         self.size = [float(v) for v in (self.size if isinstance(self.size, list) else [self.size])]
         if len(self.size) != need:

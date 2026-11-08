@@ -129,7 +129,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   to `grasp_standoff_mm` (0.15 in) off the face (gripper opened only to the part width + `gripper.open_margin_mm`:
   `GripperCfg.open_for`, chord of the jaw swing, `jaw_length_mm` 80 URDF estimate, deg/unit from the calibration;
   part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate; tool point aimed beside
-  the part toward the **fixed jaw** — its inner face is at the tool point, from the meshes — by radius + half margin)
+  the part toward the **fixed jaw** — its inner face is at the tool point, from the meshes — by radius + half margin; per-type `open_margin_mm` and `fixed_jaw_side` (+/− along the grip axis, else either side by wrist roll):
+  glue = 4 mm margin, fixed jaw on −x, so only the moving jaw goes between it and the breadboards ~12 mm to its right)
   → grip (miss: open + back out) → pull straight out — per part: what clears its socket
   (`length_mm` − protrusion + 10 mm) up to 40 mm more where it fits, max `pull_mm` 150 → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
@@ -227,7 +228,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   anything" — aim higher the further out: lift = `lift_mm` · (r / (`at_reach` · max reach))^`power`, defaults
   6 mm at 70 % (user's pick after the averaged tray fit; max reach ≈ 44 cm → 31 cm), power 2 (≈ 1 mm at 13 cm, 10 mm at 40 cm). Applied at **run
   time only** (`raise_steps` in `goto_runner` and `TrayPacker`: every JointMove/LineMove pose re-solved with z
-  raised, same tool orientation; unreachable → refused before moving); plans, checks, dry-run paths and
+  raised by damped least squares on lift/elbow/wrist only (pan + roll kept), tool tilt held — near a singularity
+  (sleep = gripper straight up, arm stretched out) it may tilt ≤ `MAX_TILT_CHANGE_DEG` 5° to reach; joints kept in
+  ±100; else refused before moving. placo IK was used before and stalled 1-3 mm short at sleep: every pick refused); plans, checks, dry-run paths and
   hand-guided calibrations are unchanged. `cell.yaml` `reach_comp:` defaults; toggle + height saved in
   `data/reach_comp.json` (sim `start`: `sim_reach_comp.json`). `GET/PUT /api/reach-comp {enabled?, lift_mm?}`.
 - Box moves open the jaws to `boxes.jaw_gap_mm` 24 mm on the approach/release.

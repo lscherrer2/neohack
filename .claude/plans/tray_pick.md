@@ -55,7 +55,10 @@ Measured from TheRobotStudio/SO-ARM100 `wrist_roll_follower_so101_v1.stl` (fixed
 in the tool frame: the **fixed jaw's inner face is at x ≈ 0 (through the tool point)**, its body on +x; the
 moving jaw is on −x, opens toward −x, touches at URDF −10° (= gripper 0). So the planner aims the tool point
 beside the part: `aim = pocket + side · (grip_mm/2 + open_margin_mm/2)`, side = tool +x in the tray plane
-(`side_offset_mm`). Both jaw orientations (roll 180° apart) are planned; roll nearest mid-range wins.
+(`side_offset_mm`). Both jaw orientations (roll 180° apart) are planned; roll nearest mid-range wins — unless the type sets
+`fixed_jaw_side` (+/− along its grip axis). Per-type `open_margin_mm` overrides the gripper's. Glue (2026-11-08,
+moving jaw hit the breadboard on its right, 18.5 mm from the stick center): margin 4 mm (2 a side), fixed jaw on −x
+→ moving jaw inner face 8.25 mm from center (was 11.25), ~10 mm left for the jaw before the board.
 Mesh check at the planned grasp (aa_1/3/7, glue_4, 9v_2, piezo_4): fixed jaw 4–5 mm clear of the part, open moving
 jaw 6–7 mm, moving jaw meets the part at 8–18 units (≫ min_grip 3).
 **Open: jaw tips stick out ~6 mm past the tool point along z.** At the planned grasp the fixed-jaw tip reaches

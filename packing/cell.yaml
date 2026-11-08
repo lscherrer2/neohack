@@ -2,7 +2,9 @@
 # Orders are packed by TrayPacker (packing/boxes/): parts from the tray, boxes from the orders DB.
 
 robot:
-  port: /dev/cu.usbmodem5CE51213501
+  port:                    # first one that exists wins
+    - /dev/cu.usbmodem5CE51213501                              # macOS
+    - /dev/serial/by-id/usb-1a86_USB_Single_Serial_5CE5121350-if00   # Raspberry Pi (Linux)
   id: my_awesome_follower_arm
 
 poses_file: data/poses.json
@@ -33,7 +35,9 @@ tray:
     aa:         {name: AA battery,    feature: circle,   size: 15.5,        grip_axis: x, length_mm: 50}
     9v:         {name: 9V battery,    feature: rect,     size: [27.5, 18.5], grip_axis: x, length_mm: 48}
     piezo:      {name: piezo speaker, feature: pin_pair, size: 1.3, spacing: 8, grip_axis: x, grip_mm: 12, length_mm: 15}   # body Ø: estimate, measure
-    glue:       {name: glue stick,    feature: circle,   size: 12.5,        grip_axis: x, length_mm: 120}
+    glue:       {name: glue stick,    feature: circle,   size: 12.5,        grip_axis: x, length_mm: 120, open_margin_mm: 4, fixed_jaw_side: -x}
+                           # glue: breadboards ~12 mm to its right (+x) -> tight opening (2 mm a side) and the thick
+                           # fixed jaw on the left; only the thin moving jaw goes between the stick and the board
     breadboard: {name: breadboard,    feature: rect,     size: [52, 2.5],   grip_axis: y, min_grip: 1, length_mm: 40}   # thin: tune on hardware
 
 # catalog: (sku -> spoken name) defaults to the tray type names above
@@ -80,6 +84,7 @@ gripper:
   squeeze: 3
   min_part_width: 3        # if the gripper closes tighter than this, the pick counts as missed
   open_margin_mm: 10       # picks open to part width (tray.types: grip_mm or feature size) + this, not to `open`
+                           # (per type: tray.types open_margin_mm)
   jaw_length_mm: 80        # jaw pivot -> fingertip, URDF estimate (deg per unit comes from the calibration)
 
 motion:

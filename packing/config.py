@@ -28,12 +28,13 @@ class GripperCfg:
 
         return math.degrees(2 * math.asin(min(1.0, width_mm / (2 * self.jaw_length_mm)))) / self.deg_per_unit
 
-    def open_for(self, width_mm: float) -> float:
-        """Gripper value that opens the fingertips `width_mm + open_margin_mm` apart (capped at `open`).
-        Fingertip gap ~ chord 2 L sin(angle / 2); unit 0 = closed (jaws touching)."""
+    def open_for(self, width_mm: float, margin_mm: float | None = None) -> float:
+        """Gripper value that opens the fingertips `width_mm + margin_mm` (default `open_margin_mm`) apart (capped
+        at `open`). Fingertip gap ~ chord 2 L sin(angle / 2); unit 0 = closed (jaws touching)."""
         import math
 
-        half = min(1.0, (width_mm + self.open_margin_mm) / (2 * self.jaw_length_mm))
+        margin = self.open_margin_mm if margin_mm is None else margin_mm
+        half = min(1.0, (width_mm + margin) / (2 * self.jaw_length_mm))
         units = math.degrees(2 * math.asin(half)) / self.deg_per_unit
         direction = 1.0 if self.open >= self.closed else -1.0
         value = self.closed + direction * units
@@ -172,6 +173,12 @@ class CellConfig:
         return self.tray.layout().slots() if self.tray else {}
 
 
+def _pick_port(port: str | list[str]) -> str:
+    """`robot.port` may list several paths (e.g. Mac + Pi); the first that exists wins, else the first."""
+    ports = [port] if isinstance(port, str) else list(port)
+    return next((p for p in ports if Path(p).exists()), ports[0])
+
+
 def load_config(path: str | Path) -> CellConfig:
     path = Path(path)
     raw = yaml.safe_load(path.read_text())
@@ -183,7 +190,7 @@ def load_config(path: str | Path) -> CellConfig:
 
     r = raw["robot"]
     cfg = CellConfig(
-        port=r["port"],
+        port=_pick_port(r["port"]),
         robot_id=r.get("id", "my_awesome_follower_arm"),
         poses_file=rel(raw.get("poses_file", "data/poses.json")),
         inventory_db=(Path(":memory:") if raw.get("inventory_db") == ":memory:"
