@@ -42,6 +42,14 @@ line up `lift_mm` → check holding → hold.
 
 Twist grows with pull length; what matters is the twist while the part is still in its pocket (≈ part length).
 
+### Gripper opening (2026-11-07)
+Fully open (`gripper.open: 60`) is ~98 mm at the fingertips — far too wide. Picks open to the part width +
+`gripper.open_margin_mm` (10): `GripperCfg.open_for(width)` = chord 2·L·sin(θ/2) inverted, L = `jaw_length_mm`
+(80, URDF pivot→tool point estimate), θ per unit = calibrated gripper range / 100 (1.27°). Part width = type
+`grip_mm` or the DXF feature (circle Ø, rect side along the grip axis); pin_pair types must give `grip_mm`
+(piezo 12: estimate). Values: aa 14.5, 9v 21.4, piezo 12.5, glue 12.7, breadboard 7.1 units. The runner logs the
+measured grip width (`last.grip_width`, activity "gripped at width …") → use it to check L / the widths.
+
 ## Interfaces
 - `POST /api/arm/pick {pocket, confirm_move}` — dry run unless `confirm_move`; same runner/Stop/state
   (`GET /api/arm/goto`) as go-to. Does **not** change inventory (test; drop spot TBD).

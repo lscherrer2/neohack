@@ -16,6 +16,7 @@ interface PickReply {
   plan: {
     pocket: string; sku: string; pitch_deg: number; tilt_deg: number; pull_mm: number; lift_mm: number;
     grasp_standoff_mm: number; travel_units: number; pull_twist_deg: number; jaw_off_deg: number;
+    grip_mm: number; open_value: number | null;
     steps: { step: string; label: string }[];
   };
   calibration: string;
@@ -85,7 +86,8 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
 
   const k = pick?.plan;
   const pickBody = k
-    ? `Test pick of the ${k.sku} in ${k.pocket}: open the gripper, free move (largest joint change ` +
+    ? `Test pick of the ${k.sku} in ${k.pocket}: open the gripper to ${k.open_value ?? "fully open"} ` +
+      `(part ${k.grip_mm} mm + margin), free move (largest joint change ` +
       `${k.travel_units.toFixed(0)} units) to the approach point, slowly straight in to ` +
       `${k.grasp_standoff_mm.toFixed(1)} mm off the tray face, grip, pull straight out ${k.pull_mm.toFixed(0)} mm ` +
       `along the normal, lift ${k.lift_mm.toFixed(0)} mm and hold the part there. ` +

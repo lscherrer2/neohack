@@ -33,6 +33,7 @@ class TrayType:
     spacing: float | None = None  # pin_pair: center distance between the two pins
     grip_axis: str = "x"  # tray-frame axis the gripper fingers close along (before pocket yaw)
     min_grip: float | None = None  # gripper units; closing tighter = missed/dropped (None = gripper.min_part_width)
+    grip_mm: float | None = None  # part width between the jaws; None = from the feature (circle Ø / rect side)
 
     def __post_init__(self) -> None:
         if self.feature not in FEATURES:
@@ -45,6 +46,17 @@ class TrayType:
             raise ValueError(f"tray type {self.sku}: {self.feature} needs size with {need} value(s)")
         if self.feature == "pin_pair" and not self.spacing:
             raise ValueError(f"tray type {self.sku}: pin_pair needs spacing")
+        if self.feature == "pin_pair" and self.grip_mm is None:
+            raise ValueError(f"tray type {self.sku}: pin_pair needs grip_mm (the part's width; the pins don't say)")
+
+    @property
+    def grip_width_mm(self) -> float:
+        """Width of the part between the jaws (mm)."""
+        if self.grip_mm is not None:
+            return float(self.grip_mm)
+        if self.feature == "circle":
+            return self.size[0]
+        return self.size[0] if self.grip_axis == "x" else self.size[1]
 
 
 @dataclass

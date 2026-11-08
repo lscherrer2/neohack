@@ -38,7 +38,7 @@ tray:
   types:                   # sku: DXF feature (mm) + which tray axis the fingers close along
     aa:         {name: AA battery,    feature: circle,   size: 15.5,        grip_axis: x}
     9v:         {name: 9V battery,    feature: rect,     size: [27.5, 18.5], grip_axis: x}
-    piezo:      {name: piezo speaker, feature: pin_pair, size: 1.3, spacing: 8, grip_axis: x}
+    piezo:      {name: piezo speaker, feature: pin_pair, size: 1.3, spacing: 8, grip_axis: x, grip_mm: 12}   # body Ø: estimate, measure
     glue:       {name: glue stick,    feature: circle,   size: 12.5,        grip_axis: x}
     breadboard: {name: breadboard,    feature: rect,     size: [52, 2.5],   grip_axis: y, min_grip: 1}   # thin: tune on hardware
 
@@ -54,6 +54,8 @@ gripper:
   squeeze: 3
   min_part_width: 3        # if the gripper closes tighter than this, the pick counts as missed
   min_box_width: 10
+  open_margin_mm: 10       # picks open to part width (tray.types: grip_mm or feature size) + this, not to `open`
+  jaw_length_mm: 80        # jaw pivot -> fingertip, URDF estimate (deg per unit comes from the calibration)
 
 motion:
   speed: 30                # units/s (joint range is -100..100)

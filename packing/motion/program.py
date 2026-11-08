@@ -55,6 +55,7 @@ class LineMove:
 @dataclass
 class OpenGripper:
     label: str = "open gripper"
+    value: float | None = None  # gripper value; None = fully open (gripper.open)
 
 
 @dataclass
@@ -64,6 +65,7 @@ class Grip:
     min_width: float
     label: str = "grip"
     on_fail: list = field(default_factory=list)
+    measured: float | None = None  # filled in by run(): grip width (gripper units from closed)
 
 
 @dataclass
@@ -86,6 +88,8 @@ def describe(steps: list[Step]) -> list[dict]:
             d.update(length_mm=round(s.length_mm, 1), speed_mm_s=s.speed_mm_s)
         elif isinstance(s, (Grip, CheckHolding)):
             d["min_width"] = s.min_width
+        elif isinstance(s, OpenGripper) and s.value is not None:
+            d["value"] = round(s.value, 1)
         out.append(d)
     return out
 
@@ -144,8 +148,8 @@ class ProgramBuilder:
         """Straight line by offset `d_m` (meters, robot frame) from the current tip."""
         return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label)
 
-    def open_gripper(self, label: str = "open gripper") -> OpenGripper:
-        step = OpenGripper(label)
+    def open_gripper(self, label: str = "open gripper", value: float | None = None) -> OpenGripper:
+        step = OpenGripper(label, value)
         self.steps.append(step)
         return step
 
@@ -192,9 +196,9 @@ def _run_one(step: Step, motion, GraspError) -> None:
     elif isinstance(step, LineMove):
         motion.follow(step.path, step.duration, step.label)
     elif isinstance(step, OpenGripper):
-        motion.open_gripper()
+        motion.open_gripper(step.value)
     elif isinstance(step, Grip):
-        motion.grip(step.min_width)
+        step.measured = motion.grip(step.min_width)
     elif isinstance(step, CheckHolding):
         width = abs(motion.read()["gripper"] - motion.gripper.closed)
         if width < step.min_width:

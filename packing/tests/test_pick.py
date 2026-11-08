@@ -118,6 +118,18 @@ class PickPlanTests(unittest.TestCase):
                 np.testing.assert_allclose(MODEL.tip(lift.path[-1]), p_end + [0, 0, plan.lift_mm / 1000], atol=0.002)
                 self.assertLessEqual(plan.pitch_deg, t.max_pitch_deg)
 
+    def test_opens_to_part_width_plus_margin_not_fully(self):
+        g = self.cfg.gripper
+        for pocket, width in (("aa_1", 15.5), ("glue_2", 12.5), ("piezo_1", 12.0), ("breadboard_1", 2.5)):
+            plan = self.plan(pocket)
+            self.assertEqual(plan.grip_mm, width)
+            self.assertEqual(plan.steps[0].value, plan.open_value)
+            self.assertLess(plan.open_value, g.open / 2)  # far less than fully open
+            # fingertip gap at that opening = width + margin (chord of the jaw swing)
+            gap = 2 * g.jaw_length_mm * np.sin(np.radians(plan.open_value * g.deg_per_unit) / 2)
+            self.assertAlmostEqual(gap, width + g.open_margin_mm, delta=0.3)
+        self.assertEqual(GripperCfg(open=30).open_for(500), 30)  # capped at fully open
+
     def test_breadboard_grips_vertically_others_sideways(self):
         jaw = lambda plan: MODEL.fk(plan.steps[2].path[-1])[:3, 0]  # noqa: E731
         self.assertGreater(abs(jaw(self.plan("breadboard_2"))[2]), 0.6)  # tray y ~ up
@@ -152,12 +164,14 @@ class PickRunTests(unittest.TestCase):
 
     def test_pick_succeeds_and_holds_part_high(self):
         plan = plan_pocket_pick(MODEL, self.cfg.tray, self.cfg.gripper, self.cal, "glue_4", self.arm.read())
-        self.arm.gripper_block = 20.0  # a part between the jaws
+        self.arm.gripper_block = plan.open_value - 4  # a part between the jaws, a bit narrower than the opening
         self.runner.start(plan)
         self.runner.join(30)
         self.assertEqual(self.runner.last["status"], "done", self.runner.last)
         np.testing.assert_allclose(MODEL.tip(self.arm.read()), MODEL.tip(plan.steps[-2].path[-1]), atol=0.003)
-        self.assertAlmostEqual(self.arm.read()["gripper"], 20.0, delta=0.5)
+        self.assertAlmostEqual(self.arm.read()["gripper"], plan.open_value - 4, delta=0.5)
+        self.assertAlmostEqual(self.runner.last["grip_width"], plan.open_value - 4, delta=0.5)
+        self.assertTrue(any("gripped at width" in e for e in self.events))
         self.assertEqual(self.hub.mode, "idle")
 
     def test_missed_grip_backs_out_and_fails(self):
@@ -168,7 +182,7 @@ class PickRunTests(unittest.TestCase):
         self.assertIn("nothing grasped", self.runner.last["error"])
         approach = MODEL.tip(plan.steps[1].pose)
         np.testing.assert_allclose(MODEL.tip(self.arm.read()), approach, atol=0.003)  # backed out
-        self.assertGreater(self.arm.read()["gripper"], 50)  # opened again
+        self.assertAlmostEqual(self.arm.read()["gripper"], plan.open_value, delta=1.0)  # opened again, part-wide
 
     def test_api_dry_run_then_move(self):
         http = TestClient(create_server(OrderStore(":memory:"), Catalog(self.cfg.catalog, 1), shelf=Shelf(self.cfg),
@@ -180,7 +194,7 @@ class PickRunTests(unittest.TestCase):
         self.assertEqual(r["plan"]["sku"], "piezo")
         self.assertEqual([s["step"] for s in r["plan"]["steps"]][:4], ["OpenGripper", "JointMove", "LineMove", "Grip"])
         self.assertEqual(http.post("/api/arm/pick", json={"pocket": "corner_bl"}).status_code, 404)
-        self.arm.gripper_block = 15.0
+        self.arm.gripper_block = r["plan"]["open_value"] - 4
         self.assertTrue(http.post("/api/arm/pick", json={"pocket": "piezo_5", "confirm_move": True}).json()["started"])
         deadline = time.monotonic() + 60  # runner shared with go-to: its state endpoint reports the pick
         while (st := http.get("/api/arm/goto").json())["running"] and time.monotonic() < deadline:

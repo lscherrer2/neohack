@@ -4,7 +4,7 @@ Everything comes from the tray calibration: pocket position, tray normal (= pull
 direction (the type's `grip_axis` in tray x/y, turned by the pocket yaw, mapped into the robot frame).
 
 Program (one procedure for every type; the per-type differences are data in `tray.types`):
-  open gripper -> free move to the approach point (`protrusion + approach_mm` out along the normal)
+  open gripper (part width + margin) -> free move to the approach point (`protrusion + approach_mm` out along the normal)
   -> straight line in to `grasp_standoff_mm` off the tray face -> grip (stall detect, type `min_grip`;
   on a miss: open + back out) -> straight line out `pull_mm` along the normal -> check still holding
   -> straight line up `lift_mm` -> hold (drop spot: TBD).
@@ -39,6 +39,8 @@ class PickSettings:
 
     grip_axis: str  # x | y (tray frame, before pocket yaw)
     min_grip: float  # gripper units: closing tighter than this = missed / dropped
+    grip_mm: float = 0.0  # part width between the jaws
+    open_value: float | None = None  # gripper value to open to (part width + margin); None = fully open
     protrusion_mm: float = 10.0
     approach_mm: float = 30.0  # approach point = protrusion + this, out from the face
     grasp_standoff_mm: float = 3.81  # tool tip off the tray face when it closes (0.15 in)
@@ -55,6 +57,7 @@ class PickSettings:
             raise KeyError(f"no tray type {sku!r}")
         return cls(grip_axis=t.grip_axis,
                    min_grip=t.min_grip if t.min_grip is not None else gripper_cfg.min_part_width,
+                   grip_mm=t.grip_width_mm, open_value=round(gripper_cfg.open_for(t.grip_width_mm), 1),
                    protrusion_mm=tray_cfg.protrusion_mm, approach_mm=tray_cfg.approach_mm,
                    grasp_standoff_mm=tray_cfg.grasp_standoff_mm, pull_mm=tray_cfg.pull_mm,
                    extract_mm=tray_cfg.extract_mm, lift_mm=tray_cfg.lift_mm,
@@ -75,6 +78,8 @@ class PickPlan:
     travel_units: float  # largest joint change of the free move
     pull_twist_deg: float = 0.0  # tool rotation during the pull-out (5-DOF: yaw follows the pan)
     jaw_off_deg: float = 0.0  # jaw closing axis vs the wanted grip direction at the grasp
+    grip_mm: float = 0.0
+    open_value: float | None = None
 
     @property
     def label(self) -> str:
@@ -85,7 +90,8 @@ class PickPlan:
                 "pitch_deg": self.pitch_deg, "tilt_deg": round(self.tilt_deg, 1), "pull_mm": self.pull_mm,
                 "lift_mm": round(self.lift_mm, 1), "grasp_standoff_mm": self.grasp_standoff_mm,
                 "travel_units": round(self.travel_units, 1), "pull_twist_deg": round(self.pull_twist_deg, 1),
-                "jaw_off_deg": round(self.jaw_off_deg, 1), "steps": describe(self.steps)}
+                "jaw_off_deg": round(self.jaw_off_deg, 1), "grip_mm": self.grip_mm, "open_value": self.open_value,
+                "steps": describe(self.steps)}
 
 
 class AxisIK:
@@ -200,14 +206,14 @@ def _plan_one(model, pocket, sku, c, n, close_dir, approach, grasp, current, s, 
     targets, poses = best_targets(model, ik, far, inward, close_dir, seeds)
     ProgramBuilder(model, current).joint_to(targets[0], "pull-out end", poses, targets=targets[:1])
 
-    b.open_gripper()
+    b.open_gripper(f"open to {s.open_value} (part {s.grip_mm:g} mm + margin)", s.open_value)
     # the jaws are (near) symmetric: closing along +x or -x is the same grip — take whichever wrist roll fits
     targets, poses = best_targets(model, ik, approach, inward, close_dir, seeds)
     move = b.joint_to(targets[0], "approach point", poses, targets=targets)
     travel = max(abs(move.pose[j] - b.start[j]) for j in move.pose)
     line_in = b.line_to(grasp, IN_SPEED_MM_S, f"in to {s.grasp_standoff_mm:.1f} mm off {pocket}")
     back_out = LineMove(list(reversed(line_in.path)), line_in.length_mm, IN_SPEED_MM_S, "back out (missed)")
-    b.grip(s.min_grip, f"grip {sku}", on_fail=[OpenGripper("open (missed)"), back_out])
+    b.grip(s.min_grip, f"grip {sku}", on_fail=[OpenGripper("open (missed)", s.open_value), back_out])
     b.line_by(n * pull / 1000, PULL_SPEED_MM_S, f"pull out {pull:.0f} mm")
     b.check_holding(s.min_grip)
     lift = 0.0
@@ -228,7 +234,7 @@ def _plan_one(model, pocket, sku, c, n, close_dir, approach, grasp, current, s, 
     pull_path = next(st for st in b.steps if isinstance(st, LineMove) and st.label.startswith("pull")).path
     twist = max(math.degrees(Rotation.from_matrix(R_grasp.T @ model.fk(q)[:3, :3]).magnitude()) for q in pull_path)
     return PickPlan(pocket, sku, [round(float(v), 5) for v in c], b.steps, pitch, tilt, pull, lift,
-                    s.grasp_standoff_mm, travel, twist, jaw_off)
+                    s.grasp_standoff_mm, travel, twist, jaw_off, s.grip_mm, s.open_value)
 
 
 def _angle(a: np.ndarray, b: np.ndarray) -> float:

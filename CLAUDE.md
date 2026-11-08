@@ -118,7 +118,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   report shows the worst angle per item.
 - **Pick test** (plan `.claude/plans/tray_pick.md`; `tray/pick.py`, `POST /api/arm/pick {pocket, confirm_move}`,
   dashboard "Pick test…" in the Go-to box; same runner/Stop as go-to): open → free move to approach point → line in
-  to `grasp_standoff_mm` (0.15 in) off the face → grip (miss: open + back out) → pull straight out `pull_mm` (150,
+  to `grasp_standoff_mm` (0.15 in) off the face (gripper opened only to the part width + `gripper.open_margin_mm`:
+  `GripperCfg.open_for`, chord of the jaw swing, `jaw_length_mm` 80 URDF estimate, deg/unit from the calibration;
+  part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate) → grip (miss: open + back out) → pull straight out `pull_mm` (150,
   else `extract_mm` 120) → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
   uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard

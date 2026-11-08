@@ -18,6 +18,21 @@ class GripperCfg:
     squeeze: float = 3.0  # extra closing past the contact point while holding
     min_part_width: float = 3.0  # grip narrower than this (from `closed`) = missed the part
     min_box_width: float = 10.0  # same, for boxes
+    # opening just wide enough for a part (packing/tray/pick.py): width + margin, converted to gripper units
+    open_margin_mm: float = 10.0  # total extra opening beyond the part width (both sides together)
+    jaw_length_mm: float = 80.0  # jaw pivot -> fingertip (URDF estimate; measure to refine)
+    deg_per_unit: float = 1.27  # jaw degrees per gripper unit (load_config fills it from the calibration range)
+
+    def open_for(self, width_mm: float) -> float:
+        """Gripper value that opens the fingertips `width_mm + open_margin_mm` apart (capped at `open`).
+        Fingertip gap ~ chord 2 L sin(angle / 2); unit 0 = closed (jaws touching)."""
+        import math
+
+        half = min(1.0, (width_mm + self.open_margin_mm) / (2 * self.jaw_length_mm))
+        units = math.degrees(2 * math.asin(half)) / self.deg_per_unit
+        direction = 1.0 if self.open >= self.closed else -1.0
+        value = self.closed + direction * units
+        return min(value, self.open) if direction > 0 else max(value, self.open)
 
 
 @dataclass
@@ -141,6 +156,13 @@ def load_config(path: str | Path) -> CellConfig:
         motion=MotionCfg(**(raw.get("motion") or {})),
         tray=_load_tray(raw.get("tray"), rel),
     )
+    try:  # jaw degrees per gripper unit from the calibrated range (0..100 spans range_min..range_max)
+        from .hardware.so101 import load_calibration
+
+        g = load_calibration(cfg.robot_id)["gripper"]
+        cfg.gripper.deg_per_unit = abs(g.range_max - g.range_min) * 360 / 4096 / 100
+    except Exception:  # noqa: BLE001 — no calibration file: keep the default
+        pass
     if cfg.tray:  # tray item names fill in the catalog
         for t in cfg.tray.types:
             cfg.catalog.setdefault(t.sku, t.name)

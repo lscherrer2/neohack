@@ -182,9 +182,11 @@ class Motion:
         for i in range(1, steps + 1):
             self._tick({**self.cmd, "gripper": start + (value - start) * i / steps}, BODY)
 
-    def open_gripper(self) -> None:
-        self._gripper_to(self.gripper.open)
-        self._settle({**self.cmd, "gripper": self.gripper.open}, ["gripper"], GRIPPER_OPEN_TOL, "gripper open")
+    def open_gripper(self, value: float | None = None) -> None:
+        """Open to `value` (default: fully, `gripper.open`)."""
+        value = self.gripper.open if value is None else value
+        self._gripper_to(value)
+        self._settle({**self.cmd, "gripper": value}, ["gripper"], GRIPPER_OPEN_TOL, "gripper open")
 
     def grip(self, min_width: float) -> float:
         """Close until the fingers stall on an object. Returns grip width (distance from `closed`).

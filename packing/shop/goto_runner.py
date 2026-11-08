@@ -16,7 +16,7 @@ import time
 from typing import Callable
 
 from ..motion.controller import Motion, MotionError
-from ..motion.program import JointMove, run
+from ..motion.program import Grip, JointMove, run
 from ..poses import PoseStore
 
 log = logging.getLogger(__name__)
@@ -100,7 +100,11 @@ class GotoRunner:
                          for s in plan.steps]
                 run(steps, motion, on_step=lambda s: self.last.update(step=s.label))
             self.last["status"] = "done"
-            self.record("robot", f"Done: {name}; holding", point=target, tilt_deg=round(plan.tilt_deg, 1))
+            widths = [round(s.measured, 1) for s in steps if isinstance(s, Grip) and s.measured is not None]
+            if widths:
+                self.last["grip_width"] = widths[-1]
+            self.record("robot", f"Done: {name}; holding" + (f" (gripped at width {widths[-1]})" if widths else ""),
+                        point=target, tilt_deg=round(plan.tilt_deg, 1))
         except Stopped:
             self._hold()
             self.last["status"] = "stopped"
