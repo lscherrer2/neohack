@@ -26,7 +26,7 @@ from typing import Callable
 
 import numpy as np
 
-from ..motion.kinematics import ArmModel, PathError
+from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
 from ..motion.program import ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets
 from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersect, box_block, box_frame, box_tilt_deg,
@@ -104,28 +104,32 @@ class BoxMovePlan:
                 "max_carry_tilt_deg": round(self.max_carry_tilt_deg, 1), "steps": describe(self.steps)}
 
 
-def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float, lift_m: float,
-                obstacles: list[Block], samples: int = 30) -> float:
-    """The joint-space carry from pose a to b: the box stays up (tool never below half the lift above the grasp
-    height), its tilt stays ≤ MAX_CARRY_TILT_DEG, and the box (3D block) never comes within CLEARANCE of an
-    obstacle (other boxes, the tray and its stand). Returns the largest box tilt. Raises PathError."""
-    worst = 0.0
+DIP_TOL = 0.005  # a guided carry may sag this much below its lower end (m)
+
+
+def check_path(model: ArmModel, box: Box, path: list[dict], obstacles: list[Block], label: str) -> float:
+    """A guided carry (dense joint path): the box (3D block) ≥ CLEARANCE from obstacles, the arm ≥ ARM_CLEARANCE,
+    box tilt ≤ MAX_CARRY_TILT_DEG, and the tool never below the lower end of the path − DIP_TOL. Returns the
+    largest box tilt. Raises PathError."""
     tool_in_box_inv = np.linalg.inv(box.tool_in_box)
-    for i in range(samples + 1):
-        s = i / samples
-        T = model.fk({j: a[j] + (b[j] - a[j]) * s for j in a})
-        if T[2, 3] < z_grasp + lift_m / 2:
-            raise PathError(f"carrying box {box.id} would dip to {(T[2, 3] - z_grasp) * 1000:.0f} mm above its "
-                            f"grasp height", T[:3, 3])
+    z_ends = [float(model.fk(path[0])[2, 3]), float(model.fk(path[-1])[2, 3])]
+    floor = min(z_ends) - DIP_TOL
+    worst = 0.0
+    for k, q in enumerate(path):
+        T = model.fk(q)
+        s = k / max(1, len(path) - 1)
+        if T[2, 3] < floor:
+            raise PathError(f"{label}: box {box.id} would sag {(min(z_ends) - T[2, 3]) * 1000:.0f} mm "
+                            f"({s:.0%} of the way)", T[:3, 3])
         tilt = box_tilt_deg(T, box.tool_in_box)
         worst = max(worst, tilt)
         if tilt > MAX_CARRY_TILT_DEG:
-            raise PathError(f"carrying box {box.id} would tilt it {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)", T[:3, 3])
+            raise PathError(f"{label}: box {box.id} would tilt {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)", T[:3, 3])
         carried = box_block(T @ tool_in_box_inv)
         for ob in obstacles:
             if blocks_intersect(carried, ob, CLEARANCE / 2):
-                raise PathError(f"carrying box {box.id} would hit {ob.name} ({s:.0%} of the way)", T[:3, 3])
-        check_arm_clear(model, {j: a[j] + (b[j] - a[j]) * s for j in a}, obstacles, f"carrying box {box.id}", s)
+                raise PathError(f"{label}: box {box.id} would hit {ob.name} ({s:.0%} of the way)", T[:3, 3])
+        check_arm_clear(model, q, obstacles, f"{label}", s)
     return worst
 
 
@@ -234,52 +238,92 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
         b.check_holding(min_width, "check holding the box")
         return b.pose
 
-    def to_dst_up(prev: dict, mm: float, label: str) -> dict:
-        dst_up = T_dst[:3, 3] + up * mm / 1000
-        targets, poses = best_targets(model, ik, dst_up, T_dst[:3, 2], T_dst[:3, 0], [prev, *reach_seeds(model, dst_up)])
-        return b.joint_to(targets[0], label, seeds=poses, targets=targets[:1], speed=cfg.motion.speed / 2).pose
+    def solve(prev: dict, pt: np.ndarray, z_axis: np.ndarray, x_axis: np.ndarray) -> dict:
+        targets, poses = best_targets(model, ik, pt, z_axis, x_axis, [prev, *reach_seeds(model, pt)])
+        q = poses[0]
+        if np.linalg.norm(model.tip(q) - pt) > POSITION_TOL_M:
+            raise PathError(f"can't reach {np.round(pt * 1000, 1)} mm holding the box", pt)
+        return q
 
-    # 1) direct: short straight lift (higher if the swing passes something low), swing, lower
+    def guided(prev: dict, waypoints: list[np.ndarray], final_axes: np.ndarray | None, label: str) -> dict:
+        """A carry through tool-point waypoints (box held level, tab facing the swivel), solved one after the other
+        and played as ONE smooth dense path — so the box follows the waypoints (no sagging between far-apart
+        poses). Checked: box + arm vs obstacles, box tilt, and the height never dips below the lower end."""
+        sols, q = [], prev
+        for k, pt in enumerate(waypoints):
+            last = k == len(waypoints) - 1 and final_axes is not None
+            u = np.array([*(pt[:2] - pan_xy), 0.0])
+            u /= np.linalg.norm(u)
+            q = solve(q, pt, final_axes[:3, 2] if last else u, final_axes[:3, 0] if last else T_src[:3, 0])
+            sols.append(q)
+        dense, a = [], prev
+        for c in sols:  # fine joint interpolation between consecutive (close) waypoints
+            dense += [{j: a[j] + (c[j] - a[j]) * t / 6 for j in a} for t in range(1, 7)]
+            a = c
+        nonlocal worst
+        worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label))
+        b.path(dense, bc.line_speed_mm_s, label)
+        return b.pose
+
+    def ease_out(t: float) -> float:  # fast first: rise early / move out early
+        return 1 - (1 - t) ** 2
+
+    def ease_in(t: float) -> float:  # slow first
+        return t * t
+
+    az_src, az_dst = model.azimuth(T_src[:3, 3]), model.azimuth(T_dst[:3, 3])
+
+    def polar(az: float, r: float, z: float) -> np.ndarray:
+        return np.array([pan_xy[0] + r * np.cos(az), pan_xy[1] + r * np.sin(az), z])
+
+    def r_of(p: np.ndarray) -> float:
+        return float(np.linalg.norm(p[:2] - pan_xy))
+
+    def swing(az0: float, az1: float, r0: float, r1: float, z: float, n_min: int = 3) -> list[np.ndarray]:
+        n = max(n_min, int(np.ceil(abs(np.degrees(az1 - az0)) / 12)))
+        return [polar(az0 + (az1 - az0) * k / n, r0 + (r1 - r0) * k / n, z) for k in range(1, n + 1)]
+
+    # 1) direct: short straight lift (higher if the swing passes something low), swing at constant height around
+    #    the swivel to above the destination. If the swing passes near something: only at the height that goes
+    #    over it — never squeezing past it low.
     done = False
-    # (if the swing passes near something, only at the height that goes over it — never squeezing past it low)
     for mm in [max(bc.carry_mm, over)]:
         if mm > DIRECT_MAX_MM:
             continue
         b.reset(gripped)
         try:
             lifted = lift_up(mm)
-            end = to_dst_up(lifted, mm, f"carry to above {LOCATION_NAMES[dst]}")
-            worst = check_carry(model, box, lifted, end, float(T_src[2, 3]), mm / 1000, obstacles)
+            p0, p1 = b.tip, T_dst[:3, 3] + up * mm / 1000
+            pts = swing(az_src, az_dst, r_of(p0), r_of(p1), p0[2])
+            pts[-1] = p1
+            guided(lifted, pts, T_dst, f"carry around to above {LOCATION_NAMES[dst]}")
             lift_mm, done = mm, True
             break
         except PathError as e:
             errors.append(e.wrap(f"direct, {mm:.0f} mm up: {e}", e.steps or list(b.steps), b.start))
 
-    # 2) arc OVER: short straight lift, arc up and IN toward the swivel (the arm reaches much higher there), swing
-    #    around at that height, arc down and out to just above the destination, straight down
+    # 2) arc OVER: short straight lift; arc up and IN toward the swivel (rising first, so it never sags near the
+    #    box spot); swing around at that height; arc down and OUT (moving out first, descending last) to just above
+    #    the destination; straight down
     if not done:
-        az_src = model.azimuth(T_src[:3, 3])
-        az_dst = model.azimuth(T_dst[:3, 3])
         lowest = max(z_bottom + bc.carry_mm / 1000 + 0.04, (over_top / 1000 + OVER_CLEAR) if over_what else 0.0)
         for zb in np.arange(lowest, ARC_TOP_M + 1e-9, 0.02):  # box bottom height while swinging, lowest first
             for r in ARC_RADII_M:  # tool point distance from the swivel while swinging
                 b.reset(gripped)
                 try:
                     lifted = lift_up(bc.carry_mm)
-                    prev, segs = lifted, []
-                    for az, label in ((az_src, "arc up and in"), (az_dst, "swing around high")):
-                        u = np.array([np.cos(az), np.sin(az), 0.0])
-                        pt = np.array([pan_xy[0], pan_xy[1], 0.0]) + u * r
-                        pt[2] = zb + z_off
-                        targets, poses = best_targets(model, ik, pt, u, T_src[:3, 0], [prev, *reach_seeds(model, pt)])
-                        q = b.joint_to(targets[0], label, seeds=poses, targets=targets[:1],
-                                       speed=cfg.motion.speed / 2).pose
-                        segs.append((prev, q))
-                        prev = q
-                    end = to_dst_up(prev, bc.carry_mm, f"arc down and out to above {LOCATION_NAMES[dst]}")
-                    segs.append((prev, end))
-                    worst = max(check_carry(model, box, a, c, float(T_src[2, 3]), bc.carry_mm / 1000, obstacles)
-                                for a, c in segs)
+                    p0 = b.tip
+                    zt, r0 = zb + z_off, r_of(p0)
+                    up_arc = [polar(az_src, r0 + (r - r0) * ease_in(k / 6), p0[2] + (zt - p0[2]) * ease_out(k / 6))
+                              for k in range(1, 7)]
+                    q = guided(lifted, up_arc, None, "arc up and in")
+                    q = guided(q, swing(az_src, az_dst, r, r, zt), None, "swing around high")
+                    p1 = T_dst[:3, 3] + up * bc.carry_mm / 1000
+                    r1 = r_of(p1)
+                    down_arc = [polar(az_dst, r + (r1 - r) * ease_out(k / 6), zt + (p1[2] - zt) * ease_in(k / 6))
+                                for k in range(1, 7)]
+                    down_arc[-1] = p1
+                    guided(q, down_arc, T_dst, f"arc down and out to above {LOCATION_NAMES[dst]}")
                     lift_mm, done = (zb - z_bottom) * 1000, True
                     break
                 except PathError as e:
@@ -292,7 +336,7 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
                f"{over_top + OVER_CLEAR * 1000:.0f} mm up, and no direct lift or arc up to {ARC_TOP_M * 1000:.0f} mm "
                f"works" if over_what else "no carry works")
         raise errors[0].wrap(f"{why} — " + "; ".join(str(e) for e in errors[:4]) + (" …" if len(errors) > 4 else ""))
-    down_mm = bc.carry_mm if lift_mm > DIRECT_MAX_MM or b.steps[-1].label.startswith("arc") else lift_mm
+    down_mm = bc.carry_mm if b.steps[-1].label.startswith("arc") else lift_mm
     land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {down_mm:.0f} mm to the table (same height as picked)",
                      orientation_weight=OW)
     land_tilt = box_tilt_deg(model.fk(land.path[-1]), box.tool_in_box)

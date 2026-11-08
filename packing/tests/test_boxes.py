@@ -133,7 +133,7 @@ class PlanTests(unittest.TestCase):
             plan = plan_box_move(MODEL, box, src, dst, cur, self.cfg)
             kinds = [type(s).__name__ for s in plan.steps]
             self.assertEqual(kinds, ["OpenGripper", "JointMove", "LineMove", "Grip", "LineMove", "CheckHolding",
-                                     "JointMove", "LineMove", "OpenGripper", "LineMove"])
+                                     "LineMove", "LineMove", "OpenGripper", "LineMove"])  # carry = guided path
             come_in = plan.steps[2]  # level along the tab
             d_in = MODEL.tip(come_in.path[-1]) - MODEL.tip(come_in.path[0])
             self.assertLess(abs(d_in[2]) * 1000, 1.5)
@@ -175,13 +175,15 @@ class PlanTests(unittest.TestCase):
             plan = plan_box_move(MODEL, box, "supply", "pack", HOME, self.cfg, obs)
             top = max(block_top(o) for o in tray_blocks(self.cfg.tray))
             self.assertGreaterEqual(plan.carry_mm / 1000, top + 0.029)  # box bottom above the tray's top
-            carry = plan.steps[6]
-            start = plan.steps[4].path[-1]
-            for k in range(11):  # along the swing: neither the box nor the arm is inside the tray
-                q = {j: start[j] + (carry.pose[j] - start[j]) * k / 10 for j in start}
-                T_box = MODEL.fk(q) @ np.linalg.inv(box.tool_in_box)
-                for o in obs:
-                    self.assertFalse(blocks_intersect(box_block(T_box), o, CLEARANCE / 2))
+            carry = [st for st in plan.steps if st.label.startswith(("arc", "swing", "carry"))]
+            self.assertTrue(carry)
+            z_lift = MODEL.tip(plan.steps[4].path[-1])[2]
+            for st in carry:  # along the whole carry: no box/tray contact, and it never sags below the lift
+                for q in st.path:
+                    T = MODEL.fk(q)
+                    self.assertGreater(T[2, 3], z_lift - 0.006)
+                    for o in obs:
+                        self.assertFalse(blocks_intersect(box_block(T @ np.linalg.inv(box.tool_in_box)), o, CLEARANCE / 2))
         finally:
             self.cfg.tray.calibration_file.unlink(missing_ok=True)
 

@@ -126,3 +126,13 @@ top + 3 cm up to 28 cm; tool point 22/19/25/16 cm from the swivel) at the source
 azimuth at that height → joint move down and out to 30 mm above the landing → straight down. All segments 3D-checked.
 Sim: tray top 117/177/237 mm between box and pack spot → arc with box bottom 147/207/267 mm, box level.
 
+### Change 2026-11-07 (later): guided carries (no sag near the left spot)
+User: around the left side the box dropped too low, while the right→left move approached at the right height.
+Cause: each arc piece was ONE joint move (joints interpolate together; the tool height in between isn't controlled)
+— leaving the low lifted pose, shoulder and elbow move together and the box first sinks; arriving, a sag just looks
+like coming down early. The old check only refused a dip below half the 30 mm lift. Now every carry (direct, arc
+up/in, swing, arc down/out) goes through IK waypoints — up-arc rises first (ease-out height, ease-in radius), down-
+arc moves out first and descends last, swing every ≤ 12° — fine-interpolated and played as one `LineMove`
+(`ProgramBuilder.path`); `check_path` refuses any dip > 5 mm below the lower end. Sim: lowest point 0.0 mm vs the
+lift on every leg, both directions.
+

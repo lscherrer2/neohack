@@ -152,6 +152,17 @@ class ProgramBuilder:
         """Straight line by offset `d_m` (meters, robot frame) from the current tip."""
         return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label, orientation_weight)
 
+    def path(self, poses: list[Pose], speed_mm_s: float, label: str) -> LineMove:
+        """A pre-planned dense joint path (e.g. through IK waypoints), played smoothly like a line. Starts at the
+        current pose; its length (for the duration) is measured along the tool point."""
+        poses = [dict(self.pose)] + [{j: float(q[j]) for j in BODY} for q in poses]
+        tips = [self.model.tip(q) for q in poses]
+        length = sum(float(np.linalg.norm(b2 - a2)) for a2, b2 in zip(tips, tips[1:])) * 1000
+        step = LineMove(poses, length, speed_mm_s, label)
+        self.steps.append(step)
+        self.pose = poses[-1]
+        return step
+
     def open_gripper(self, label: str = "open gripper", value: float | None = None) -> OpenGripper:
         step = OpenGripper(label, value)
         self.steps.append(step)

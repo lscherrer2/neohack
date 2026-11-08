@@ -165,7 +165,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   straight lift ≤ 80 mm if the swing passes something low) or **arc over** (when the swing passes within 4 cm of an
   obstacle's desk outline and that needs more: arc up and IN toward the swivel — the level grip reaches tool ~35 cm
   up at 12–27 cm out, far higher than above the box spots — swing around with the box bottom ≥ obstacle top + 3 cm,
-  arc down and out). Every segment checked in **3D** (box block vs other boxes + tray plate/parts + the space under
+  arc down and out). Carries are **guided**: IK waypoints (rise first / move out first) played as one smooth dense
+  path, so the box can't sag between far-apart poses (a guided carry may not dip > 5 mm below its lower end).
+  Every segment checked in **3D** (box block vs other boxes + tray plate/parts + the space under
   it, AND the arm: shoulder→jaw points ≥ 1.5 cm; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
   box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;
