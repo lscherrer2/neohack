@@ -5,6 +5,7 @@
                                 Manual mode (default): only orders actioned on the dashboard ('ready').
   POST /api/orders/{id}/action  release a received order to the robot (queued -> ready)
   DELETE /api/orders/{id}       remove an order that isn't being packed / packed
+  DELETE /api/orders            remove every such order (keeps packing / packed)
   POST /api/shelf/restock       after refilling by hand: mark part slots / box spots as full
   GET  /api/tray                parts tray: pockets (DXF, mm), which are full, calibration (tray -> robot)
   POST /api/tray/pockets/{id}   {"full": bool}  a human marks one pocket full / empty
@@ -246,6 +247,14 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409, str(e)) from e
         events.record("order", f"Order {order_id} actioned; the robot will pack it next", order_id=order_id)
         return o.to_dict()
+
+    @app.delete("/api/orders")
+    def delete_all_orders():
+        gone = store.delete_all()
+        if gone:
+            events.record("order", f"{len(gone)} orders deleted from the dashboard",
+                          order_ids=[o.id for o in gone])
+        return {"deleted": [o.id for o in gone]}
 
     @app.delete("/api/orders/{order_id}")
     def delete_order(order_id: int):

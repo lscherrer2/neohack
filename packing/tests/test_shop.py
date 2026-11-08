@@ -103,6 +103,10 @@ class ShopTests(unittest.TestCase):
         http.post("/api/orders/2/action")
         http.post("/robot/claim")
         self.assertEqual(http.delete("/api/orders/2").status_code, 409)  # being packed
+        self.tools.place_order(["A"], "Bo")
+        self.tools.place_order(["A"], "Cy")
+        self.assertEqual(http.delete("/api/orders").json(), {"deleted": [3, 4]})
+        self.assertEqual([o.id for o in self.store.list()], [2])  # the one being packed stays
 
     def test_done_requires_packing_state(self):
         http = TestClient(create_server(self.store, self.catalog))

@@ -195,6 +195,15 @@ class OrderStore:
             self.db.execute("DELETE FROM orders WHERE id=?", (order_id,))
         return o
 
+    def delete_all(self) -> list[Order]:
+        """Remove every deletable order (keeps ones being packed or packed). Returns the removed orders."""
+        with self.lock:
+            ph = ",".join("?" * len(self.DELETABLE))
+            gone = [self._row(r) for r in self.db.execute(
+                f"SELECT * FROM orders WHERE status IN ({ph}) ORDER BY id", self.DELETABLE)]
+            self.db.execute(f"DELETE FROM orders WHERE status IN ({ph})", self.DELETABLE)
+        return gone
+
     def cancel(self, order_id: int, phone: str | None = None) -> Order:
         with self.lock:
             o = self.get(order_id)

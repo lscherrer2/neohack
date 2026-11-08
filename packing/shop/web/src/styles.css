@@ -252,3 +252,4 @@ dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
 .job-failed { border-left-color: var(--alarm); }
 .panel button.stop, .goto button.stop { background: var(--alarm); color: #fff; border-color: var(--alarm); min-width: 7em; }
 .moving-note { margin: 4px 0; color: var(--ink); font-weight: 600; }
+button.del.small { margin-left: auto; font-size: .8rem; padding: 3px 8px; border-color: color-mix(in srgb, var(--alarm) 40%, transparent); }

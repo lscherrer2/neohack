@@ -143,7 +143,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `chat.Conversation`.
 - **Manual dispatch is the default**: orders arrive `queued` (shown as "received"); the dashboard's
   **Action** → `ready`; the robot agent only claims `ready` orders (`--auto` claims `queued`).
-  **Delete** allowed for queued/ready/failed/cancelled. Statuses: queued → ready → packing → packed | failed.
+  **Delete** (one click, no confirm) allowed for queued/ready/failed/cancelled; **Delete all** (`DELETE /api/orders`,
+  click twice within 3 s) removes every such order. Statuses: queued → ready → packing → packed | failed.
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.
