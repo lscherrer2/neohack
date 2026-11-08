@@ -210,7 +210,9 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     T_src = box_pose(box, src, cfg, pan_xy) @ box.tool_in_box
     T_dst = T_land_box @ box.tool_in_box
     up = np.array([0.0, 0.0, 1.0])
-    open_value = round(g.open_for(TAB_T * 1000), 1)
+    # jaws open to `jaw_gap_mm` at the fingertips for the approach and the release / back-out (user: 2x the plate +
+    # margin — slack for imprecise reaching far out)
+    open_value = round(g.open_for(max(bc.jaw_gap_mm - g.open_margin_mm, TAB_T * 1000)), 1)
     # no "missed it" width check for boxes (user): the tab plate is 2 mm and a box wall ~0.5 mm — the jaws close
     # almost fully either way, so a width threshold can't tell a grip from a miss
     min_width = 0.0

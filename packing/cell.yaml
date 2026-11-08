@@ -67,6 +67,8 @@ boxes:
   down_speed_mm_s: 30      # last bit down onto the tab / the table
   carry_speed_mm_s: 75     # guided carries: arcs up and down, the swing around high
   free_speed: 30           # free joint moves in box moves (units/s)
+  jaw_gap_mm: 24           # jaws open this wide (fingertips) to come in on the tab and to let go / back out (2x the
+                           # first 12 mm: slack when reaching far out)
 
 max_items_per_order: 10    # items one order (= one box) may hold
 box_slots:                 # drop spots inside the box *at the pack station*, filled in order;
