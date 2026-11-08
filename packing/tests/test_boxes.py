@@ -163,6 +163,28 @@ class PlanTests(unittest.TestCase):
         low = plan_box_move(MODEL, box, "supply", "pack", cur, self.cfg)
         self.assertEqual(low.carry_mm, self.cfg.boxes.carry_mm)  # nothing in the way: lowest lift
 
+    def test_lifts_over_the_tray_when_the_swing_crosses_it(self):
+        from packing.boxes.geometry import block_top, obstacles, tray_blocks
+        from packing.boxes.move import arm_points, CLEARANCE
+        from packing.tests.test_pack import left_tray
+
+        left_tray(self.cfg, 35, 0.40)  # tray between the box (far left) and the pack spot
+        try:
+            obs = obstacles(self.cfg, {})
+            box = make_box(PAN[0] + 0.32 * np.cos(np.radians(80)), PAN[1] + 0.32 * np.sin(np.radians(80)))
+            plan = plan_box_move(MODEL, box, "supply", "pack", HOME, self.cfg, obs)
+            top = max(block_top(o) for o in tray_blocks(self.cfg.tray))
+            self.assertGreaterEqual(plan.carry_mm / 1000, top + 0.029)  # box bottom above the tray's top
+            carry = plan.steps[6]
+            start = plan.steps[4].path[-1]
+            for k in range(11):  # along the swing: neither the box nor the arm is inside the tray
+                q = {j: start[j] + (carry.pose[j] - start[j]) * k / 10 for j in start}
+                T_box = MODEL.fk(q) @ np.linalg.inv(box.tool_in_box)
+                for o in obs:
+                    self.assertFalse(blocks_intersect(box_block(T_box), o, CLEARANCE / 2))
+        finally:
+            self.cfg.tray.calibration_file.unlink(missing_ok=True)
+
     def test_refuses_collisions_and_tilted_landings(self):
         box = make_box(0.32, 0.16)
         blocker = box_block(box_frame((0.355, 0.0), 0.0, PAN), "box 2")  # sitting on the pack spot

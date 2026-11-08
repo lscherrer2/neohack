@@ -154,6 +154,33 @@ def blocks_intersect(a: Block, b: Block, margin: float = 0.0) -> bool:
     return True
 
 
+def block_corners(b: Block) -> np.ndarray:
+    """The 8 corners (robot frame, m)."""
+    signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)], float)
+    return (b.T[:3, :3] @ (signs * b.half).T).T + b.T[:3, 3]
+
+
+def block_top(b: Block) -> float:
+    return float(block_corners(b)[:, 2].max())
+
+
+def block_footprint(b: Block) -> np.ndarray:
+    """Convex outline of the block on the desk (xy), counter-clockwise."""
+    from scipy.spatial import ConvexHull
+
+    xy = block_corners(b)[:, :2]
+    try:
+        return xy[ConvexHull(xy).vertices]
+    except Exception:  # noqa: BLE001 — degenerate (flat in xy): its bounding box
+        lo, hi = xy.min(0), xy.max(0)
+        return np.array([[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]])
+
+
+def point_in_block(p: np.ndarray, b: Block, margin: float = 0.0) -> bool:
+    q = b.T[:3, :3].T @ (np.asarray(p, float) - b.T[:3, 3])
+    return bool(np.all(np.abs(q) <= b.half + margin))
+
+
 def box_block(T_box: np.ndarray, name: str = "box") -> Block:
     """The box body + its tab as one block (box frame: origin bottom center, tab along −y)."""
     T = T_box.copy()

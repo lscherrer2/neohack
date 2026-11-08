@@ -109,3 +109,11 @@ refuses closer boxes and box moves fail early with "slide it N cm further out, t
 - Planned-path view (user request): dry runs return the tool-point path; failures return how far the plan got and
   where it failed; drawn in both 3D views.
 
+### Change 2026-11-07 (later): go OVER the tray; arm collision check
+User: the plan lifted the box ~1 inch, then swung it into the tray (the tray sits a bit closer in than the box,
+between it and the pack spot). The box-only 3D check didn't check the arm, and "lowest lift that clears" isn't the
+intuitive rule. Now: `over_height_mm` — if the box's outline (grown 4 cm) crosses an obstacle's desk outline
+anywhere along the swing, the lift starts at that obstacle's top + 3 cm (box bottom); `check_arm_clear` — points
+along the arm (link origins + midpoints, shoulder → jaw) stay 2 cm from every obstacle during the carry. Sim: tray
+between box and pack spot, 27–40 cm out → lift 147 mm (tray top 117 + 30), box level, arm clear.
+

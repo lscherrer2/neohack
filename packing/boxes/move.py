@@ -27,12 +27,18 @@ import numpy as np
 from ..motion.kinematics import ArmModel, PathError
 from ..motion.program import ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets
-from .geometry import TAB_T, Block, blocks_intersect, box_block, box_frame, box_tilt_deg, mirror
+from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersect, box_block, box_frame, box_tilt_deg,
+                       footprint, mirror, overlaps, point_in_block)
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
 CARRY_HEIGHTS_MM = (60.0, 100.0, 140.0, 180.0, 220.0)  # tried after `carry_mm` when a carry would hit something
 CLEARANCE = 0.010  # carried box kept this far from other boxes / the tray (m)
+ARM_CLEARANCE = 0.020  # arm links (sampled along their center lines) kept this far from obstacles (m)
+OVER_MARGIN = 0.04  # a carry whose box passes within this of an obstacle's outline on the desk goes OVER it
+OVER_CLEAR = 0.03  # ...with the box bottom this far above the obstacle's top
+ARM_CHAIN = ["upper_arm_link", "lower_arm_link", "wrist_link", "gripper_link", "gripper_frame_link",
+             "moving_jaw_so101_v1_link"]
 MAX_LAND_TILT_DEG = 5.0  # box tilt when setting it down (more = it lands on one edge, off its spot)
 OW = 0.05  # box lines: position (level in/out, straight up/down, exact landing) beats holding the exact tool yaw
 LOCATION_NAMES = {"supply": "its supply spot (left)", "pack": "the pack spot", "output": "its output spot (right)"}
@@ -115,7 +121,41 @@ def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float, lif
         for ob in obstacles:
             if blocks_intersect(carried, ob, CLEARANCE / 2):
                 raise PathError(f"carrying box {box.id} would hit {ob.name} ({s:.0%} of the way)", T[:3, 3])
+        check_arm_clear(model, {j: a[j] + (b[j] - a[j]) * s for j in a}, obstacles, f"carrying box {box.id}", s)
     return worst
+
+
+def arm_points(model: ArmModel, q: dict) -> list[np.ndarray]:
+    """Points along the arm's center line (link origins + midpoints), shoulder to jaw tip."""
+    frames = model.link_frames(q)
+    pts = [frames[n][:3, 3] for n in ARM_CHAIN]
+    return pts + [(pts[i] + pts[i + 1]) / 2 for i in range(len(pts) - 1)]
+
+
+def check_arm_clear(model: ArmModel, q: dict, obstacles: list[Block], what: str, s: float | None = None) -> None:
+    """The arm itself (not just the box) stays ARM_CLEARANCE away from every obstacle at pose q."""
+    for pt in arm_points(model, q):
+        for ob in obstacles:
+            if point_in_block(pt, ob, ARM_CLEARANCE):
+                where = f" ({s:.0%} of the way)" if s is not None else ""
+                raise PathError(f"{what}: the arm would hit {ob.name}{where}", pt)
+
+
+def over_height_mm(model: ArmModel, box: Box, a: dict, b: dict, z_box_bottom: float, obstacles: list[Block],
+                   samples: int = 30) -> float:
+    """Lift (mm above the grasp) needed so the box goes OVER every obstacle whose desk outline the carry from a to
+    b passes within OVER_MARGIN of (box bottom ≥ its top + OVER_CLEAR). 0 if it passes nothing."""
+    tool_in_box_inv = np.linalg.inv(box.tool_in_box)
+    need = 0.0
+    outlines = [(ob, block_footprint(ob), block_top(ob)) for ob in obstacles]
+    for i in range(samples + 1):
+        s = i / samples
+        T_box = model.fk({j: a[j] + (b[j] - a[j]) * s for j in a}) @ tool_in_box_inv
+        fp = footprint(T_box, margin=OVER_MARGIN)
+        for ob, outline, top in outlines:
+            if overlaps(fp, outline):
+                need = max(need, top + OVER_CLEAR - z_box_bottom)
+    return need * 1000
 
 
 def too_close(T_box: np.ndarray, pan_xy: np.ndarray, cfg) -> str | None:
@@ -169,7 +209,20 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.line_to(T_src[:3, 3], bc.down_speed_mm_s, "in level along the tab", orientation_weight=OW)
     b.grip(min_width, f"grip box {box.id}")
     gripped = b.mark()
-    heights = [bc.carry_mm] + [h for h in CARRY_HEIGHTS_MM if h > bc.carry_mm]
+    # go OVER anything the carry passes near (tray, other boxes): estimate the swing at the lowest lift, then
+    # start from the height that clears those obstacles' tops
+    over = 0.0
+    try:
+        probe = b.line_by(up * bc.carry_mm / 1000, bc.line_speed_mm_s, "probe", orientation_weight=OW)
+        dst_low = T_dst[:3, 3] + up * bc.carry_mm / 1000
+        _, poses = best_targets(model, ik, dst_low, T_dst[:3, 2], T_dst[:3, 0], [b.pose, *reach_seeds(model, dst_low)])
+        z_bottom = float(box_pose(box, src, cfg, pan_xy)[2, 3])  # box bottom at the grasp (on the desk)
+        over = over_height_mm(model, box, probe.path[-1], poses[0], z_bottom, obstacles)
+    except PathError:
+        pass
+    b.reset(gripped)
+    base = max(bc.carry_mm, over)
+    heights = [base] + [h for h in CARRY_HEIGHTS_MM if h > base + 1]
     errors: list[PathError] = []
     for lift_mm in heights:  # use vertical space: lowest carry that clears everything
         b.reset(gripped)

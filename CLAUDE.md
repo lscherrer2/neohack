@@ -161,8 +161,10 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   up/down on the 2 mm tab plate (fixed jaw under the plate = wrist roll ≈ 0; on top needs roll ~180°, past its
   limit). A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that
   grip by hand → Calibration tab "Add box". Box move: in level along the tab (22 mm), grip (no width check: plate
-  2 mm / wall ~0.5 mm), straight up 30 mm — or higher (60…220 mm) until the carry clears everything — joint-space
-  carry checked in **3D** (box block vs other boxes + tray plate/parts + the space under it; no dip; box tilt ≤ 30°),
+  2 mm / wall ~0.5 mm), straight up — 30 mm, or **over** anything the swing passes near (box bottom ≥ that
+  obstacle's top + 3 cm when the box's outline comes within 4 cm of its outline on the desk), higher still if
+  needed — joint-space carry checked in **3D** (box block vs other boxes + tray plate/parts + the space under it,
+  AND the arm itself: points along shoulder→jaw kept 2 cm away; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
   box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;
   345 failed deeper grips, 365+ the drops), each reserved part picked + dropped (centered over the opening, jaws above the
