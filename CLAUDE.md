@@ -169,8 +169,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   up at 12–27 cm out, far higher than above the box spots — swing around with the box bottom ≥ obstacle top + 3 cm,
   arc down and out). Carries are **guided**: IK waypoints (rise first / move out first) played as one smooth dense
   path, so the box can't sag between far-apart poses (a guided carry may not dip > 5 mm below its lower end).
-  Speeds (`boxes:`): carries 75 mm/s, lifts/slides 60, last bit down 30, free moves 30 units/s (user: 2–3x the
-  first cautious ones). Every segment checked in **3D** (box block vs other boxes + tray plate/parts + the space under
+  Speeds (`boxes:`): the arc carry is ONE continuous move (arc up + swing + arc down, no stop at the top), evenly
+  resampled, max 120 mm/s at the tip and paced by the busiest joint (`carry_joint_speed` 60 units/s); lifts/slides
+  60 mm/s, last bit down 30, free moves 30 units/s. Every segment checked in **3D** (box block vs other boxes + tray plate/parts + the space under
   it, AND the arm: shoulder→jaw points ≥ 1.5 cm; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
   box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;

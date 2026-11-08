@@ -152,15 +152,33 @@ class ProgramBuilder:
         """Straight line by offset `d_m` (meters, robot frame) from the current tip."""
         return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label, orientation_weight)
 
-    def path(self, poses: list[Pose], speed_mm_s: float, label: str) -> LineMove:
-        """A pre-planned dense joint path (e.g. through IK waypoints), played smoothly like a line. Starts at the
-        current pose; its length (for the duration) is measured along the tool point."""
-        poses = [dict(self.pose)] + [{j: float(q[j]) for j in BODY} for q in poses]
-        tips = [self.model.tip(q) for q in poses]
-        length = sum(float(np.linalg.norm(b2 - a2)) for a2, b2 in zip(tips, tips[1:])) * 1000
-        step = LineMove(poses, length, speed_mm_s, label)
+    def path(self, poses: list[Pose], speed_mm_s: float, label: str, max_joint_speed: float | None = None,
+             spacing_mm: float = 3.0) -> LineMove:
+        """A pre-planned dense joint path (e.g. through IK waypoints), played smoothly in one go like a line.
+        Starts at the current pose. Resampled to even `spacing_mm` steps along the tool point, so it plays at a
+        steady speed (not faster wherever the waypoints happened to be sparse). Duration: the tool point at most
+        `speed_mm_s`, and — if `max_joint_speed` (units/s) is given — paced by whichever joint moves most, so a swing
+        close to the swivel isn't held to a slow tool speed."""
+        raw = [dict(self.pose)] + [{j: float(q[j]) for j in BODY} for q in poses]
+        tips = np.array([self.model.tip(q) for q in raw])
+        seg = np.linalg.norm(np.diff(tips, axis=0), axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        length_m = float(cum[-1])
+        n = max(2, int(np.ceil(length_m * 1000 / spacing_mm)))
+        out = []
+        for k in range(n + 1):
+            d = length_m * k / n
+            i = min(int(np.searchsorted(cum, d, side="right")) - 1, len(raw) - 2)
+            t = 0.0 if seg[i] < 1e-12 else (d - cum[i]) / seg[i]
+            out.append({j: raw[i][j] + (raw[i + 1][j] - raw[i][j]) * t for j in BODY})
+        length = length_m * 1000
+        duration = length / speed_mm_s
+        if max_joint_speed:
+            travel = max(sum(abs(b2[j] - a2[j]) for a2, b2 in zip(raw, raw[1:])) for j in BODY)
+            duration = max(duration, travel / max_joint_speed)
+        step = LineMove(out, length, length / duration if duration > 0 else speed_mm_s, label)
         self.steps.append(step)
-        self.pose = poses[-1]
+        self.pose = out[-1]
         return step
 
     def open_gripper(self, label: str = "open gripper", value: float | None = None) -> OpenGripper:

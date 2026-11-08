@@ -160,3 +160,10 @@ box list show `fixed_jaw_calibrated` / `fixed_jaw_used`.
   calibrated spot (catches a tilted base / uneven desk: 1° over 30 cm ≈ 5 mm). UI: Calibration → Desk; touched
   points drawn in 3D.
 
+### Change 2026-11-07 (later): no slow-down at the top of the arc
+User: the swivel is much slower at the top of the arc. Causes: the up-arc, swing and down-arc were three moves (each
+eases to a stop and settles: two stops at the top), and the swing was timed by the tool point's speed — close to
+the swivel (~20 cm) 75 mm/s is a slow base turn. Now one continuous guided move; `ProgramBuilder.path` resamples it
+to even tool-point spacing (steady speed) and times it by max(length / carry_speed_mm_s 120, busiest joint's travel /
+carry_joint_speed 60). Sim, over the tray: carry 5.1 s in one go (was 1.9 + 4.4 + 1.9 s plus two settles).
+

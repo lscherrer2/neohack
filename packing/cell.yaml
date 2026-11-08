@@ -65,7 +65,8 @@ boxes:
                            # tab tip; much longer would bring the grip point under the ~25 cm level-grip limit)
   line_speed_mm_s: 60      # straight lifts / slides along the tab (2.5x the first cautious 25)
   down_speed_mm_s: 30      # last bit down onto the tab / the table
-  carry_speed_mm_s: 75     # guided carries: arcs up and down, the swing around high
+  carry_speed_mm_s: 120    # guided carries (arc up + swing high + arc down, one continuous move): max tool speed
+  carry_joint_speed: 60    # ...paced by the busiest joint (units/s), so the swing near the swivel isn't slow
   free_speed: 30           # free joint moves in box moves (units/s)
   jaw_gap_mm: 24           # jaws open this wide (fingertips) to come in on the tab and to let go / back out (2x the
                            # first 12 mm: slack when reaching far out)

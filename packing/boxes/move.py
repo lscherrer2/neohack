@@ -296,7 +296,7 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             a = c
         nonlocal worst
         worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label))
-        b.path(dense, bc.carry_speed_mm_s, label)
+        b.path(dense, bc.carry_speed_mm_s, label, max_joint_speed=bc.carry_joint_speed)
         return b.pose
 
     def ease_out(t: float) -> float:  # fast first: rise early / move out early
@@ -350,14 +350,14 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
                     zt, r0 = zb + z_off, r_of(p0)
                     up_arc = [polar(az_src, r0 + (r - r0) * ease_in(k / 6), p0[2] + (zt - p0[2]) * ease_out(k / 6))
                               for k in range(1, 7)]
-                    q = guided(lifted, up_arc, None, "arc up and in")
-                    q = guided(q, swing(az_src, az_dst, r, r, zt), None, "swing around high")
                     p1 = T_dst[:3, 3] + up * bc.carry_mm / 1000
                     r1 = r_of(p1)
                     down_arc = [polar(az_dst, r + (r1 - r) * ease_out(k / 6), zt + (p1[2] - zt) * ease_in(k / 6))
                                 for k in range(1, 7)]
                     down_arc[-1] = p1
-                    guided(q, down_arc, T_dst, f"arc down and out to above {LOCATION_NAMES[dst]}")
+                    # ONE continuous move (no stop-and-settle at the top between the up-arc, swing and down-arc)
+                    guided(lifted, up_arc + swing(az_src, az_dst, r, r, zt) + down_arc, T_dst,
+                           f"arc up, swing around high and arc down to above {LOCATION_NAMES[dst]}")
                     lift_mm, done = (zb - z_bottom) * 1000, True
                     break
                 except PathError as e:

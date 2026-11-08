@@ -119,7 +119,9 @@ class BoxesCfg:
     # clears the tab tip (~15 mm behind the grip point + jaw tips); longer runs below the ~25 cm level-grip limit
     line_speed_mm_s: float = 60.0  # straight lifts / slides along the tab (user: 2–3x faster, was 25)
     down_speed_mm_s: float = 30.0  # the last bit down onto the tab / the table (was 12)
-    carry_speed_mm_s: float = 75.0  # guided carries: arcs up/down, the swing around high (was 25)
+    carry_speed_mm_s: float = 120.0  # guided carries (arc up + swing + arc down, one move): max tool-point speed
+    carry_joint_speed: float = 60.0  # ...and paced by the busiest joint (units/s) — so a swing close to the swivel
+    # isn't held to a slow tool speed
     jaw_gap_mm: float = 24.0  # fingertip gap while approaching / releasing a box (2x the plate + margin's 12 mm)
     free_speed: float = 30.0  # free joint moves in box moves, units/s (was half the motion speed: 15)
 
