@@ -10,7 +10,7 @@ optional empirical correction: the further out the aim point, the higher it goes
 ## What
 - `lift(r) = lift_mm · (r / (at_reach · max_reach))^power`; r = tool point's horizontal distance from the swivel;
   `max_reach_m(model)` = farthest tool-point r over the joint ranges (grid, cached; ≈ 441 mm).
-- Defaults `lift_mm` 12.7, `at_reach` 0.7, `power` 2 (sag grows with the lever arm; ~0 close in where touches read
+- Defaults `lift_mm` 6 (was 12.7; user, 2026-11-07, after the averaged tray fit), `at_reach` 0.7, `power` 2 (sag grows with the lever arm; ~0 close in where touches read
   right). Power 2 is our pick — the user only gave the 70 % point; set `power: 1` in `cell.yaml` `reach_comp:` for
   a straight line from the swivel.
 - Run time only: `raise_steps(model, steps, rc)` re-solves every JointMove pose / LineMove path pose (and Grip

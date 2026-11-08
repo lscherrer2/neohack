@@ -95,8 +95,11 @@ class GotoRunner:
                 motion = Motion(stoppable, PoseStore(self.cfg.poses_file), self.cfg.motion, self.cfg.gripper,
                                 sleep=self.sleep, log=log.info, gravity=getattr(self.hub, "gravity", None))
                 self.record("robot", f"Starting: {name}", point=target)
-                slow = self.cfg.motion.speed / 2
-                steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s
+                # free moves with no speed of their own: picks at the configured speed (2x faster, 2026-11-07),
+                # go-to previews / box moves at half
+                from ..tray.pick import PickPlan
+                free = self.cfg.motion.speed / (1 if isinstance(plan, PickPlan) else 2)
+                steps = [JointMove(s.pose, s.speed or free, s.label) if isinstance(s, JointMove) else s
                          for s in plan.steps]
                 steps = self._reach_comp(steps)  # aim higher further out, if turned on (before anything moves)
                 run(steps, motion, on_step=lambda s: self.last.update(step=s.label))

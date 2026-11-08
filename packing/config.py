@@ -115,6 +115,8 @@ class BoxesCfg:
     carry_speed_mm_s: float = 120.0  # guided carries (arc up + swing + arc down, one move): max tool-point speed
     carry_joint_speed: float = 60.0  # ...and paced by the busiest joint (units/s) — so a swing close to the swivel
     # isn't held to a slow tool speed
+    carry_turn_speed: float = 0.25  # arc carry: relative speed at the top corners (up -> swing -> down)
+    carry_ease_deg: float = 30.0  # ...back to full speed over this much of the swing (each end)
     jaw_gap_mm: float = 24.0  # fingertip gap while approaching / releasing a box (2x the plate + margin's 12 mm)
     free_speed: float = 30.0  # free joint moves in box moves, units/s (was half the motion speed: 15)
 

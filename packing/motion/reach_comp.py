@@ -6,7 +6,7 @@ for an empirical "extra sag correction": raise every aim point by
     lift(r) = lift_mm · (r / (at_reach · max_reach)) ** power
 
 r = the tool point's horizontal distance from the swivel, max_reach = the farthest the tool point gets out
-(`max_reach_m`). Defaults: ½ in (12.7 mm) at 70 % of max reach, power 2 — sag grows with the lever arm, so
+(`max_reach_m`). Defaults: 6 mm at 70 % of max reach, power 2 — sag grows with the lever arm, so
 near the base it's ~0 (where touches already read right) and it rises steeply further out.
 
 Applied at RUN time only (`raise_steps`, called by `shop/goto_runner.py` and `boxes/packer.py` right before
@@ -34,7 +34,7 @@ ORIENTATION_WEIGHT = 0.5  # keep the tool orientation (a level box grip stays le
 @dataclass
 class ReachComp:
     enabled: bool = False
-    lift_mm: float = 12.7  # how much higher at at_reach of max reach
+    lift_mm: float = 6.0  # how much higher at at_reach of max reach (user's pick after the averaged tray fit, 2026-11-07)
     at_reach: float = 0.7  # fraction of max reach where lift_mm applies
     power: float = 2.0  # 1 = straight line from the swivel, 2 = grows with the lever arm
 

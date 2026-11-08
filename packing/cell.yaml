@@ -57,6 +57,9 @@ boxes:
   down_speed_mm_s: 30      # last bit down onto the tab / the table
   carry_speed_mm_s: 120    # guided carries (arc up + swing high + arc down, one continuous move): max tool speed
   carry_joint_speed: 60    # ...paced by the busiest joint (units/s), so the swing near the swivel isn't slow
+  carry_turn_speed: 0.25   # ...slowed to this fraction at the top corners of the arc (rise -> swing -> down)
+  carry_ease_deg: 30       # ...and eased back to full speed over this much of the swing, each end
+                           # (a sudden sideways swing loosened the box in the jaws, 2026-11-07)
   free_speed: 30           # free joint moves in box moves (units/s)
   jaw_gap_mm: 24           # jaws open this wide (fingertips) to come in on the tab and to let go / back out (2x the
                            # first 12 mm: slack when reaching far out)

@@ -287,7 +287,8 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             raise PathError(f"can't reach {np.round(pt * 1000, 1)} mm holding the box", pt)
         return q
 
-    def guided(prev: dict, waypoints: list[np.ndarray], final_axes: np.ndarray | None, label: str) -> dict:
+    def guided(prev: dict, waypoints: list[np.ndarray], final_axes: np.ndarray | None, label: str,
+               speeds: list[float] | None = None) -> dict:
         """A carry through tool-point waypoints (box held level, tab facing the swivel), solved one after the other
         and played as ONE smooth dense path — so the box follows the waypoints (no sagging between far-apart
         poses). Checked: box + arm vs obstacles, box tilt, and the height never dips below the lower end."""
@@ -299,13 +300,36 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             q = solve(q, pt, final_axes[:3, 2] if last else u, final_axes[:3, 0] if last else T_src[:3, 0])
             sols.append(q)
         dense, a = [], prev
-        for c in sols:  # fine joint interpolation between consecutive (close) waypoints
+        f = (speeds or [1.0])[0]
+        scale = []
+        for k, c in enumerate(sols):  # fine joint interpolation between consecutive (close) waypoints
             dense += [{j: a[j] + (c[j] - a[j]) * t / 6 for j in a} for t in range(1, 7)]
-            a = c
+            fc = speeds[k] if speeds else 1.0
+            scale += [f + (fc - f) * t / 6 for t in range(1, 7)]
+            a, f = c, fc
         nonlocal worst
         worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label, desk))
-        b.path(dense, bc.carry_speed_mm_s, label, max_joint_speed=bc.carry_joint_speed)
+        b.path(dense, bc.carry_speed_mm_s, label, max_joint_speed=bc.carry_joint_speed,
+               speed_scale=scale if speeds else None)
         return b.pose
+
+    def carry_speeds(n_up: int, swing_deg: float, n_swing: int, n_down: int) -> list[float]:
+        """Relative speed per arc-over waypoint: full on the way up, slowing to `carry_turn_speed` at the top
+        corner, smoothly back to full over the first `carry_ease_deg` of the swing, and mirrored at the end."""
+        lo = bc.carry_turn_speed
+        ramp = max(1e-9, min(bc.carry_ease_deg, swing_deg / 2))
+
+        def smooth(x: float) -> float:
+            x = min(1.0, max(0.0, x))
+            return x * x * (3 - 2 * x)
+
+        up = [1 - (1 - lo) * smooth(k / n_up) for k in range(1, n_up + 1)]
+        sw = []
+        for k in range(1, n_swing + 1):
+            deg = swing_deg * k / n_swing
+            sw.append(lo + (1 - lo) * smooth(min(deg, swing_deg - deg) / ramp))
+        down = [lo + (1 - lo) * smooth(k / n_down) for k in range(1, n_down + 1)]
+        return up + sw + down
 
     def ease_out(t: float) -> float:  # fast first: rise early / move out early
         return 1 - (1 - t) ** 2
@@ -363,9 +387,13 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
                     down_arc = [polar(az_dst, r + (r1 - r) * ease_out(k / 6), zt + (p1[2] - zt) * ease_in(k / 6))
                                 for k in range(1, 7)]
                     down_arc[-1] = p1
-                    # ONE continuous move (no stop-and-settle at the top between the up-arc, swing and down-arc)
-                    guided(lifted, up_arc + swing(az_src, az_dst, r, r, zt) + down_arc, T_dst,
-                           f"arc up, swing around high and arc down to above {LOCATION_NAMES[dst]}")
+                    # ONE continuous move (no stop-and-settle at the top between the up-arc, swing and down-arc),
+                    # slowed into the corners at the top and easing into / out of the sideways swing (a sudden
+                    # swing jerked the box in the jaws)
+                    sw = swing(az_src, az_dst, r, r, zt)
+                    guided(lifted, up_arc + sw + down_arc, T_dst,
+                           f"arc up, swing around high and arc down to above {LOCATION_NAMES[dst]}",
+                           speeds=carry_speeds(len(up_arc), abs(np.degrees(az_dst - az_src)), len(sw), len(down_arc)))
                     lift_mm, done = (zb - z_bottom) * 1000, True
                     break
                 except PathError as e:

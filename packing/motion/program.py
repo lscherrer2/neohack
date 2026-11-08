@@ -153,28 +153,44 @@ class ProgramBuilder:
         return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label, orientation_weight)
 
     def path(self, poses: list[Pose], speed_mm_s: float, label: str, max_joint_speed: float | None = None,
-             spacing_mm: float = 3.0) -> LineMove:
+             spacing_mm: float = 3.0, speed_scale: list[float] | None = None) -> LineMove:
         """A pre-planned dense joint path (e.g. through IK waypoints), played smoothly in one go like a line.
         Starts at the current pose. Resampled to even `spacing_mm` steps along the tool point, so it plays at a
         steady speed (not faster wherever the waypoints happened to be sparse). Duration: the tool point at most
         `speed_mm_s`, and — if `max_joint_speed` (units/s) is given — paced by whichever joint moves most, so a swing
-        close to the swivel isn't held to a slow tool speed."""
+        close to the swivel isn't held to a slow tool speed.
+
+        `speed_scale` (one factor in (0, 1] per pose in `poses`; the start takes the first): relative speed along
+        the path, interpolated between poses — e.g. slow down where the path turns and ease into a swing. Samples
+        are spaced closer where it's slow (`follow` plays samples evenly in time)."""
         raw = [dict(self.pose)] + [{j: float(q[j]) for j in BODY} for q in poses]
         tips = np.array([self.model.tip(q) for q in raw])
         seg = np.linalg.norm(np.diff(tips, axis=0), axis=1)
         cum = np.concatenate([[0.0], np.cumsum(seg)])
         length_m = float(cum[-1])
-        n = max(2, int(np.ceil(length_m * 1000 / spacing_mm)))
+        if speed_scale is None:
+            v = np.ones(len(raw))
+        else:
+            if len(speed_scale) != len(poses):
+                raise ValueError("speed_scale needs one factor per pose")
+            v = np.clip(np.array([speed_scale[0], *speed_scale], float), 0.05, 1.0)
+        # "slowness time" tau(d) = integral of 1/v along the path: sampling evenly in tau gives the speed profile
+        fine = np.linspace(0.0, length_m, max(2, int(np.ceil(length_m * 1000)) + 1))
+        inv = 1.0 / np.interp(fine, cum, v)
+        tau = np.concatenate([[0.0], np.cumsum((inv[1:] + inv[:-1]) / 2 * np.diff(fine))])
+        tau_m = float(tau[-1])
+        n = max(2, int(np.ceil(tau_m * 1000 / spacing_mm)))
         out = []
         for k in range(n + 1):
-            d = length_m * k / n
+            d = float(np.interp(tau_m * k / n, tau, fine)) if tau_m > 0 else 0.0
             i = min(int(np.searchsorted(cum, d, side="right")) - 1, len(raw) - 2)
             t = 0.0 if seg[i] < 1e-12 else (d - cum[i]) / seg[i]
             out.append({j: raw[i][j] + (raw[i + 1][j] - raw[i][j]) * t for j in BODY})
         length = length_m * 1000
-        duration = length / speed_mm_s
+        duration = tau_m * 1000 / speed_mm_s
         if max_joint_speed:
-            travel = max(sum(abs(b2[j] - a2[j]) for a2, b2 in zip(raw, raw[1:])) for j in BODY)
+            vmid = (v[1:] + v[:-1]) / 2
+            travel = max(sum(abs(b2[j] - a2[j]) / f for a2, b2, f in zip(raw, raw[1:], vmid)) for j in BODY)
             duration = max(duration, travel / max_joint_speed)
         step = LineMove(out, length, length / duration if duration > 0 else speed_mm_s, label)
         self.steps.append(step)

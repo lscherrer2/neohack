@@ -86,8 +86,9 @@ class TrayPacker:
                                  f"{len(plan.steps)} steps", order_id=order.id, box_id=plan.box_id)
             motion = Motion(arm, PoseStore(self.cfg.poses_file), self.cfg.motion, self.cfg.gripper,
                             sleep=self.sleep, log=log.info, gravity=getattr(self.hub, "gravity", None))
-            slow = self.cfg.motion.speed / 2
-            steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s for s in raised]
+            # pick / drop free moves (no speed of their own) at the configured speed (was half: 2x faster, 2026-11-07)
+            free = self.cfg.motion.speed
+            steps = [JointMove(s.pose, s.speed or free, s.label) if isinstance(s, JointMove) else s for s in raised]
             # step index -> what happens when that step STARTS (on_step runs before each step)
             index = {id(st): k for k, st in enumerate(steps)}
             starts = {r["start"]: i for i, r in enumerate(plan.item_steps)}

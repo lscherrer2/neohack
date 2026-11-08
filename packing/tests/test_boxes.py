@@ -219,6 +219,11 @@ class PlanTests(unittest.TestCase):
             carry = [st for st in plan.steps if st.label.startswith(("arc", "swing", "carry"))]
             self.assertTrue(carry)
             z_lift = MODEL.tip(plan.steps[5].path[-1])[2]
+            arc = [st for st in carry if st.label.startswith("arc")]
+            self.assertTrue(arc)  # eases into the sideways swing: pan creeps at the top corner, full speed mid-swing
+            pan = np.abs(np.diff([q["shoulder_pan"] for q in arc[0].path]))  # samples are evenly spaced in time
+            moving = np.flatnonzero(pan > 0.02 * pan.max())
+            self.assertLess(pan[moving[0]:moving[0] + 3].max(), 0.35 * pan.max())
             for st in carry:  # along the whole carry: no box/tray contact, and it never sags below the lift
                 for q in st.path:
                     T = MODEL.fk(q)

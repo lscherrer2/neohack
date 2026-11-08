@@ -132,7 +132,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   → grip (miss: open + back out) → pull straight out — per part: what clears its socket
   (`length_mm` − protrusion + 10 mm) up to 40 mm more where it fits, max `pull_mm` 150 → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
-  uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
+  uses the smallest pitch that fits. Speeds (2x the first ones, user 2026-11-07): line in 30 / pull 40 / lift 60 mm/s (`tray/pick.py`),
+  free moves at `motion.speed` (go-to previews / box-move fallbacks stay at half). Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
   jaws tilt with the pitch, up to ~40°). Jaw tips stick out ~6 mm past the tool point (open question:
   fingertip tool point + recalibration, see the plan). **No inventory change** (test); orders pick through
   `boxes/pack.py` / `TrayPacker`. Not yet run on the real arm.
@@ -173,7 +174,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   arc down and out). Carries are **guided**: IK waypoints (rise first / move out first) played as one smooth dense
   path, so the box can't sag between far-apart poses (a guided carry may not dip > 5 mm below its lower end).
   Speeds (`boxes:`): the arc carry is ONE continuous move (arc up + swing + arc down, no stop at the top), evenly
-  resampled, max 120 mm/s at the tip and paced by the busiest joint (`carry_joint_speed` 60 units/s); lifts/slides
+  resampled, max 120 mm/s at the tip and paced by the busiest joint (`carry_joint_speed` 60 units/s), slowed to
+  `carry_turn_speed` 0.25 at the top corners and eased back to full over `carry_ease_deg` 30° of the swing at each end
+  (a sudden sideways swing loosened the box in the jaws; `ProgramBuilder.path(speed_scale=)`); lifts/slides
   60 mm/s, last bit down 30, free moves 30 units/s. Every segment checked in **3D** (box block vs other boxes + tray plate/parts + the space under
   it, AND the arm: shoulder→jaw points ≥ 1.5 cm; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
@@ -213,7 +216,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - **Reach compensation** (optional, off by default; `motion/reach_comp.py`, Calibration tab → "Reach compensation";
   plan `.claude/plans/reach_comp.md`): user's empirical extra sag correction after the joint fit "didn't do
   anything" — aim higher the further out: lift = `lift_mm` · (r / (`at_reach` · max reach))^`power`, defaults
-  12.7 mm at 70 % (max reach ≈ 44 cm → 31 cm), power 2 (≈ 2 mm at 13 cm, 21 mm at 40 cm). Applied at **run
+  6 mm at 70 % (user's pick after the averaged tray fit; max reach ≈ 44 cm → 31 cm), power 2 (≈ 1 mm at 13 cm, 10 mm at 40 cm). Applied at **run
   time only** (`raise_steps` in `goto_runner` and `TrayPacker`: every JointMove/LineMove pose re-solved with z
   raised, same tool orientation; unreachable → refused before moving); plans, checks, dry-run paths and
   hand-guided calibrations are unchanged. `cell.yaml` `reach_comp:` defaults; toggle + height saved in

@@ -25,7 +25,7 @@ from packing.tests.test_pick import real_like_cal
 from packing.tests.test_tray import temp_config
 from packing.tray.pick import plan_pocket_pick
 
-ON = ReachComp(enabled=True)  # ½ in at 70 % of max reach, power 2
+ON = ReachComp(enabled=True, lift_mm=12.7)  # ½ in at 70 % of max reach, power 2 (default height is 6 mm)
 Q = {"shoulder_pan": 0.0, "shoulder_lift": 20.0, "elbow_flex": 30.0, "wrist_flex": 40.0, "wrist_roll": 0.0}
 
 
@@ -37,6 +37,7 @@ class CurveTests(unittest.TestCase):
         self.assertLess(lift_m(MODEL, ON, 0.2 * m), 0.0015)  # ~nothing near the swivel
         self.assertGreater(lift_m(MODEL, ON, 0.9 * m), 0.0127)  # more further out
         self.assertEqual(lift_m(MODEL, ReachComp(), 0.7 * m), 0.0)  # off by default
+        self.assertAlmostEqual(lift_m(MODEL, ReachComp(enabled=True), 0.7 * m), 0.006, places=6)  # default 6 mm
 
     def test_raised_pose_is_higher_by_the_curve_same_orientation(self):
         T0 = MODEL.fk(Q)

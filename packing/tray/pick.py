@@ -34,9 +34,9 @@ from ..motion.program import JOINT_LIMIT, MAX_IK_ERR_M, LineMove, OpenGripper, P
 # So the part must sit on the -x side: tool point = part center + (face + radius + clearance) * tool x.
 # The jaw tips stick out ~5-6 mm past the tool point along z (calibration touches used the tips: mostly cancels).
 FIXED_JAW_FACE_MM = 0.0
-IN_SPEED_MM_S = 15.0  # final approach to the part
-PULL_SPEED_MM_S = 20.0  # pulling the part out
-LIFT_SPEED_MM_S = 30.0
+IN_SPEED_MM_S = 30.0  # final approach to the part (2x the first 15, user 2026-11-07)
+PULL_SPEED_MM_S = 40.0  # pulling the part out (2x 20)
+LIFT_SPEED_MM_S = 60.0  # (2x 30)
 
 
 @dataclass
