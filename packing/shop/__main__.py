@@ -90,7 +90,8 @@ def main() -> None:
         q.add_argument("--port", type=int, default=8000)
         q.add_argument("--db", help="orders database (default packing/data/shop_orders.db)")
         q.add_argument("--auto", action="store_true",
-                       help="robot packs new orders automatically (default: only after clicking Action)")
+                       help="start with Auto pack on (dashboard toggle): the robot packs the newest order with all "
+                            "its stock, once a box is ready (default off: only after clicking Action)")
         q.add_argument("--mcp-token", help="remote-agent MCP (/agent/mcp): require 'Authorization: Bearer <token>' "
                                            "(default: env SHOP_MCP_TOKEN, else open)")
         q.add_argument("--allow-host", action="append", metavar="HOST",
@@ -134,6 +135,7 @@ def main() -> None:
               f"(auth: {'bearer token' if token else 'NONE, open'}; hosts: {', '.join(args.allow_host or ['any'])})")
         try:
             uvicorn.run(create_server(store, catalog, events=events, auto_dispatch=args.auto, shelf=shelf, hub=hub,
+                                      box_packing=bool(args.robot) and args.cmd == "start",
                                       agent_token=token, agent_hosts=args.allow_host),
                         host=args.host, port=args.port, timeout_graceful_shutdown=2)
         finally:

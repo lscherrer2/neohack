@@ -171,8 +171,11 @@ class FailedIn(BaseModel):
 
 def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None = None,
                   auto_dispatch: bool = False, shelf=None, hub=None, agent_token: str | None = None,
-                  agent_hosts: list[str] | None = None) -> FastAPI:
-    """auto_dispatch=False: the robot only packs orders someone clicked "Action" on.
+                  agent_hosts: list[str] | None = None, box_packing: bool = False) -> FastAPI:
+    """auto_dispatch: initial state of the dashboard's "Auto pack" toggle (PUT /api/auto-pack). Off: the robot only
+    packs orders someone clicked "Action" on. On: also the NEWEST received order whose items all have a reserved unit
+    (and, with box_packing, once an empty box waits at supply and the pack spot is free).
+    box_packing: the robot packs into boxes (TrayPacker, `start --robot`).
     hub: ArmHub (live arm view + calibration tab); None = no arm in this server.
     agent_token / agent_hosts: the remote-agent FastMCP server at /agent/mcp (mcp_server.py) — bearer token
     (None = open) and allowed Host headers (None = any, like /mcp; tunnel hostnames change)."""
@@ -227,11 +230,57 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             o = in_progress[0]
             events.record("robot", f"Robot resumed order {o.id}", order_id=o.id, items=o.items)
         else:
-            o = store.claim_next(from_status="queued" if auto_dispatch else "ready")
+            o = store.claim_next(from_status="ready")  # actioned by hand: always first
+            if o is None and auto["on"]:
+                cand, _ = _auto_candidate()
+                o = store.claim(cand.id) if cand else None
+                if o:
+                    events.record("robot", f"Auto pack: order {o.id} (the newest one with all its stock)",
+                                  order_id=o.id)
             if o:
                 events.record("robot", f"Robot started packing order {o.id} for {o.customer_name}",
                               order_id=o.id, items=o.items)
         return {"order": o.to_dict() if o else None}
+
+    # ---------------- auto pack toggle (dashboard Orders tab)
+    auto = {"on": bool(auto_dispatch)}
+
+    def _auto_candidate():
+        """(order, None): the newest received order with a reserved unit for every item, if the boxes are ready.
+        (None, why) otherwise (shown on the dashboard while auto pack waits)."""
+        queued = store.list("queued", limit=1000)  # newest first
+        if not queued:
+            return None, None
+        if box_packing:
+            listed = boxes.list()
+            if at_pack := next((b for b in listed if b.location == "pack"), None):
+                return None, f"box {at_pack.id} is still at the pack spot"
+            if not any(b.state == "available" and b.location == "supply" for b in listed):
+                return None, "no empty box at the supply spot (add one on the Calibration tab)"
+        # enough goods: every item has its own reserved unit (no shelf = no stock tracking: any order)
+        o = next((o for o in queued if shelf is None or (o.items and o.slots and None not in o.slots)), None)
+        if o is None:
+            return None, "not enough stock in the tray for any received order"
+        return o, None
+
+    class AutoIn(BaseModel):
+        enabled: bool
+
+    def _auto_state() -> dict:
+        cand, why = _auto_candidate() if auto["on"] else (None, None)
+        return {"enabled": auto["on"], "next_order": cand.id if cand else None, "waiting": why}
+
+    @app.get("/api/auto-pack")
+    def auto_pack_state():
+        return _auto_state()
+
+    @app.put("/api/auto-pack")
+    def auto_pack_set(body: AutoIn):
+        if body.enabled != auto["on"]:
+            auto["on"] = body.enabled
+            events.record("order", "Auto pack on: the robot packs the newest order with all its stock once a box is "
+                                   "ready" if body.enabled else "Auto pack off: only orders sent with Action are packed")
+        return _auto_state()
 
     def _packing(order_id: int):
         o = store.get(order_id)
@@ -1175,7 +1224,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         avail, reserved = catalog.available(), store.reserved()
         stock = [{"sku": sku, "name": name, "on_shelf": avail.get(sku, 0), "reserved": reserved.get(sku, 0)}
                  for sku, name in catalog.products.items()]
-        return {"robot": robot_state(), "counts": counts, "auto_dispatch": auto_dispatch, "stock": stock,
+        return {"robot": robot_state(), "counts": counts, "auto_dispatch": auto["on"], "auto_pack": _auto_state(),
+                "stock": stock,
                 "orders": [{**o.to_dict(), "items_text": catalog.describe(o.items)} for o in orders]}
 
     @app.get("/api/events")
