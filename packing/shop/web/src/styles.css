@@ -206,7 +206,11 @@ table.points td:last-child, table.points th:last-child { padding-right: 0; }
 .warnings { margin: 8px 0 0; padding-left: 18px; color: #7A5A00; }
 
 dialog.confirm { border: 0; border-top: 8px solid var(--safety); border-radius: 6px; padding: 22px 24px 18px;
-                 max-width: 440px; color: var(--ink); background: var(--surface); }
+                 width: min(440px, calc(100vw - 24px)); color: var(--ink); background: var(--surface);
+                 position: fixed; inset: 0; margin: auto; height: fit-content; max-height: calc(100vh - 24px);
+                 overflow: auto; box-shadow: 0 12px 32px rgba(24, 34, 46, .35); }
+/* next to the button that opened it (top/left set inline by ConfirmDialog) */
+dialog.confirm.anchored { inset: auto; margin: 0; }
 dialog.confirm::backdrop { background: rgba(24, 34, 46, .55); }
 dialog.confirm h2 { font-size: 1.6rem; }
 dialog.confirm p { font-size: 1.05rem; margin: 10px 0 18px; }
