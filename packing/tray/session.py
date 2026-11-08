@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-from .calibration import (MAX_RMS_MM, CalibrationError, TrayCalibration, approach_misalignment_deg, calibrate,
+from .calibration import (MAX_RMS_MM, WARN_RMS_MM, CalibrationError, TrayCalibration, approach_misalignment_deg, calibrate,
                           checks, tilt_deg)
 from .layout import TrayLayout
 
@@ -73,8 +73,8 @@ class CalibrationSession:
             return None, str(e)
         if cal.rms_mm > MAX_RMS_MM:
             worst = max(cal.points, key=lambda p: p.residual_mm)
-            return cal, (f"fit error {cal.rms_mm:.1f} mm RMS is above {MAX_RMS_MM} mm; worst point {worst.pocket} "
-                         f"({worst.residual_mm:.1f} mm) — recapture it")
+            return cal, (f"fit error {cal.rms_mm:.1f} mm RMS is above {MAX_RMS_MM:.0f} mm — wrong point touched? "
+                         f"worst point {worst.pocket} ({worst.residual_mm:.1f} mm) — recapture it")
         return cal, None
 
     def save(self) -> TrayCalibration:
@@ -100,6 +100,10 @@ class CalibrationSession:
                 for p in self.layout.pockets:
                     a = approach_misalignment_deg(cal, p.x, p.y, self.pan_xy)
                     fit["grip_angles"][p.sku] = round(max(fit["grip_angles"].get(p.sku, 0.0), a), 1)
+            if cal is not None and error is None and cal.rms_mm > WARN_RMS_MM:
+                worst = max(cal.points, key=lambda p: p.residual_mm)
+                fit["warnings"].append(f"touches average {cal.rms_mm:.1f} mm off the tray shape (worst {worst.pocket} "
+                                       f"{worst.residual_mm:.1f} mm) — fine to save; recapture it for a tighter fit")
         saved = self.tray.calibration()
         return {
             "active": self.active,

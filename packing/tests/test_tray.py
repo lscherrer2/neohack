@@ -121,10 +121,20 @@ class CalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(tilt_deg(cal), 40, delta=1.5)
         self.assertEqual(checks(cal, (89.44, 53.34), PAN_XY), [])
 
+    def test_averages_sloppy_points(self):
+        R, t = tilted_pose(40)
+        pts = self.measure(R, t, noise_mm=3.0, seed=1)
+        pts[2] = (pts[2][0], pts[2][1], pts[2][2] + [0.015, 0, 0])  # one corner 15 mm off: still accepted
+        cal = calibrate(pts)
+        self.assertGreater(cal.rms_mm, 3.0)
+        self.assertAlmostEqual(tilt_deg(cal), 40, delta=4)
+        center = np.mean([q for _, _, q in pts], axis=0)  # tray sits at the touches' centroid
+        np.testing.assert_allclose(cal.to_robot(79.375, 52.07), center, atol=1e-6)
+
     def test_rejects_bad_points(self):
         R, t = tilted_pose()
         pts = self.measure(R, t)
-        pts[2] = (pts[2][0], pts[2][1], pts[2][2] + [0.01, 0, 0])  # one point 10 mm off
+        pts[2] = (pts[2][0], pts[2][1], pts[2][2] + [0.08, 0, 0])  # wrong point touched (80 mm off)
         with self.assertRaises(CalibrationError) as ctx:
             calibrate(pts)
         self.assertIn("breadboard_1", str(ctx.exception))

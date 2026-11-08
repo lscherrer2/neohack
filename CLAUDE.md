@@ -111,7 +111,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   tray x for all but the breadboard (tray y). Catalog names come from the tray types;
   up to `max_items_per_order` (10) items per order, any mix. `cfg.stock_slots` = the tray pockets.
 - Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
-  points → scipy rigid fit, refused above 3 mm RMS. `tray.calibration_mode`: **corners** (default; the middle of each
+  points → averaged fit (tray face = least-squares plane through the touches, position = their centroid, in-plane turn = best 2D rotation; a corner a few mm off just nudges the average), warning above 3 mm RMS, refused only above 20 mm (wrong point touched). `tray.calibration_mode`: **corners** (default; the middle of each
   rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
   (`reference_points`: `aa_1`, `aa_7`, `breadboard_1`, `breadboard_5`). Any pocket/corner can be added as an extra
   point. CLI `tray-calibrate` or the dashboard Calibration tab (Corners/Pockets switch). Sim saves `sim_tray_cal.json`.

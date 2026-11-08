@@ -179,7 +179,11 @@ class SessionTests(unittest.TestCase):
             self.assertTrue(d3["fit"]["ok"])
             self.assertEqual([r["captured"] for r in d3["reference_points"]], [True, True, True, False])
             self.assertIn("aa", d3["fit"]["grip_angles"])
-            sess.capture("glue_4", R @ np.array([0.1143, 0.04572, 0]) + t + [0.02, 0, 0])  # bad extra point
+            sess.capture("glue_4", R @ np.array([0.1143, 0.04572, 0]) + t + [0.02, 0, 0])  # sloppy extra point
+            sloppy = sess.to_dict()["fit"]
+            self.assertTrue(sloppy["ok"])  # averaged in, with a warning
+            self.assertTrue(any("glue_4" in w for w in sloppy["warnings"]))
+            sess.capture("glue_4", R @ np.array([0.1143, 0.04572, 0]) + t + [0.1, 0, 0])  # wrong point touched
             bad = sess.to_dict()["fit"]
             self.assertFalse(bad["ok"])
             self.assertIn("glue_4", bad["error"])

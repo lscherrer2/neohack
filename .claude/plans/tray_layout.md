@@ -11,8 +11,9 @@ it should still hold, but re-check with a go-to and redo it if a corner looks of
 table-touch joint-offset calibration (only if tip-on-table readings drift beyond ~±5 mm).
 
 As built (differs from the design below): DXF read with **ezdxf** (loops via `ezdxf.edgeminer`, polylines
-exploded), rigid fit with **scipy** `Rotation.align_vectors`; fit rejected above **3 mm RMS**
-(one point 10 mm off of 4 gives ~3.3 mm); config keys `size`/`spacing`/`grip_axis` per type, no
+exploded), averaged fit (2026-11-07, exact corners were too hard to hit): normal = least-squares plane through the
+touches, position = centroid, in-plane turn = 2D Procrustes (sign/handedness from scipy `Rotation.align_vectors`);
+warning above 3 mm RMS, refused only above **20 mm RMS** (wrong / swapped point); config keys `size`/`spacing`/`grip_axis` per type, no
 `grip_width` yet; `calibration_mode: corners|pockets` (corners = middle of each R12 plate corner, ids
 `corner_bl/tl/br/tr`) + `reference_points` (pockets mode) in config; sim uses `sim_tray_cal.json`. Code: `packing/tray/`
 (`dxf.py`, `layout.py`, `calibration.py`), `packing/tools/tray_calibrate.py`, CLI `tray` / `tray-calibrate`.
@@ -74,7 +75,7 @@ for tray picks (breadboard 2.5 mm < current 3 mm threshold).
   geometric corner is in mid-air; pocket centers are precise.)
 - Tip position per point via `ArmModel.tip()` (FK on `gripper_frame_link`).
 - Fit rigid transform tray→robot (Kabsch / SVD, DXF points at z=0) → `R, t`. Report per-point
-  residual; refuse to save if RMS > 3 mm (as built). Tray normal = `R[:,2]` (sign chosen to point away from
+  residual; refuse to save if RMS > 20 mm, warn above 3 mm (as built: plane + centroid fit, see top). Tray normal = `R[:,2]` (sign chosen to point away from
   the table).
 - Sanity checks (warn, not enforce): tray center azimuth plane contains the normal ("faces the
   swivel"); tilt angle reported.

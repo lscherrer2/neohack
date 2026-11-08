@@ -1,8 +1,11 @@
 """Tray calibration: where the tray sits relative to the robot.
 
-The user hand-guides the gripper tip to a few reference pockets (tray coordinates known from the DXF)
-and we record the tip position (robot base frame, from FK). A rigid fit (Kabsch) of tray -> robot gives
-rotation R and translation t: p_robot = R @ p_tray + t, with tray points in meters and z = 0 on the face.
+The user hand-guides the gripper tip to a few reference points (tray coordinates known from the DXF)
+and we record the tip position (robot base frame, from FK). The fit gives rotation R and translation t:
+p_robot = R @ p_tray + t, with tray points in meters and z = 0 on the face. It averages rather than trusting
+any single touch: the tray face = least-squares plane through all touches, the tray's position = their
+centroid, and its in-plane turn = the best 2D rotation of the DXF points onto the touches (projected into
+that plane). So a corner touched a few mm off only nudges the average.
 
 Tray normal = R[:, 2] (out of the face). Tray frame conventions: see `layout.py`.
 """
@@ -19,7 +22,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 MIN_POINTS = 3
-MAX_RMS_MM = 3.0  # refuse to save a fit worse than this (one point 10 mm off of 4 gives ~3.3)
+MAX_RMS_MM = 20.0  # refuse only clearly wrong touches (wrong / swapped corner: tens of mm)
+WARN_RMS_MM = 3.0  # above this the fit is still used, with a warning
 MM = 0.001
 
 
@@ -28,17 +32,34 @@ class CalibrationError(ValueError):
 
 
 def fit_rigid(src: np.ndarray, dst: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Least-squares rotation R and translation t with dst ≈ R @ src + t (rows are points, n >= 3).
-    Kabsch via scipy's Rotation.align_vectors on the centered point sets."""
+    """Rotation R and translation t with dst ≈ R @ src + t (rows are points, n >= 3; src on the tray face,
+    z = 0). Plane + centroid fit: the face normal is the least-squares plane through dst, the centroids are
+    matched, and the in-plane rotation is a 2D Procrustes fit of src onto dst projected into that plane."""
     src, dst = np.asarray(src, float), np.asarray(dst, float)
     if src.shape != dst.shape or src.shape[0] < MIN_POINTS:
         raise CalibrationError(f"need at least {MIN_POINTS} matching points")
     cs, cd = src.mean(axis=0), dst.mean(axis=0)
-    sv = np.linalg.svd(src - cs, compute_uv=False)
+    a, b = src - cs, dst - cd
+    sv = np.linalg.svd(a, compute_uv=False)
     if sv[1] < 1e-3 * max(sv[0], 1e-12):
         raise CalibrationError("reference points are (nearly) in a line; pick points spread over the tray")
-    rot, _ = Rotation.align_vectors(dst - cd, src - cs)
-    R = rot.as_matrix()
+    # Plane through the touches: normal = direction of least spread. Sign from the full rigid fit, which
+    # knows the tray's handedness (which side is the front face).
+    _, _, vt = np.linalg.svd(b)
+    n = vt[2]
+    rough = Rotation.align_vectors(b, a)[0].as_matrix()
+    if n @ rough[:, 2] < 0:
+        n = -n
+    e1 = rough[:, 0] - (rough[:, 0] @ n) * n  # any in-plane basis (e1, e2, n) right-handed
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(n, e1)
+    # Best in-plane rotation (2D Procrustes, no reflection) of the tray xy onto the projected touches.
+    p = np.column_stack([b @ e1, b @ e2])
+    q = a[:, :2]
+    theta = math.atan2(float(np.sum(q[:, 0] * p[:, 1] - q[:, 1] * p[:, 0])),
+                       float(np.sum(q[:, 0] * p[:, 0] + q[:, 1] * p[:, 1])))
+    x = math.cos(theta) * e1 + math.sin(theta) * e2
+    R = np.column_stack([x, np.cross(n, x), n])
     return R, cd - R @ cs
 
 
