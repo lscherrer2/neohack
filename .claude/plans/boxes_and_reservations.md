@@ -117,3 +117,12 @@ anywhere along the swing, the lift starts at that obstacle's top + 3 cm (box bot
 along the arm (link origins + midpoints, shoulder → jaw) stay 2 cm from every obstacle during the carry. Sim: tray
 between box and pack spot, 27–40 cm out → lift 147 mm (tray top 117 + 30), box level, arm clear.
 
+### Change 2026-11-07 (later): arc over instead of only lifting straight up
+User: "it's not realizing it can go way up … via an arc that pivots mostly around the origin of the arm". Reach
+scan (level grip, outward): tool z 25–35 cm is reachable at 12–27 cm from the swivel, but at 30 cm out only up to
+~30 cm — a straight lift above the box spot runs out. `plan_box_move` now: (1) direct carry (lift 30 mm, or the
+"over" height if ≤ 80 mm), else (2) arc: lift 30 mm → joint move up and in to a high point (box bottom from obstacle
+top + 3 cm up to 28 cm; tool point 22/19/25/16 cm from the swivel) at the source azimuth → swing to the destination
+azimuth at that height → joint move down and out to 30 mm above the landing → straight down. All segments 3D-checked.
+Sim: tray top 117/177/237 mm between box and pack spot → arc with box bottom 147/207/267 mm, box level.
+

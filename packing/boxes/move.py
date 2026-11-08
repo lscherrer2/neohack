@@ -4,9 +4,11 @@ The grip is horizontal (user, 2026-11-07): gripper level, pointing away from the
 up/down on the 2 mm plate.
 
   open → free move to `approach_mm` back from the grasp (toward the arm, level) → in LEVEL along the tab → grip
-  → straight UP (`carry_mm`, or higher — CARRY_HEIGHTS_MM — until the carry clears everything: uses the vertical
-  space over the tray / other boxes) → joint-space carry to above the destination (checked in 3D: never dips, box
-  tilt ≤ MAX_CARRY_TILT_DEG, the box block ≥ CLEARANCE from the other boxes and the tray + its stand)
+  → straight UP `carry_mm` → carry, checked in 3D (box block ≥ CLEARANCE from the other boxes and the tray + its
+  stand, the arm ≥ ARM_CLEARANCE, never dips, box tilt ≤ MAX_CARRY_TILT_DEG):
+      direct — swing to above the destination (lifted higher first if the swing passes something low), or
+      arc OVER — arc up and IN toward the swivel (the arm reaches far higher close in), swing around high,
+      arc down and out to above the destination
   → straight DOWN to exactly the grasp height (the box lands where it will be picked up again; box tilt ≤
   MAX_LAND_TILT_DEG) → open → back out LEVEL along the tab.
 
@@ -32,8 +34,9 @@ from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersec
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
-CARRY_HEIGHTS_MM = tuple(float(h) for h in range(60, 321, 20))  # tried after the first height if a carry hits
-# something; up to ~the level grip's reach (tool ~33 cm up at box distances)
+DIRECT_MAX_MM = 80.0  # straight lifts above the box spot beyond this: use the arc instead (reach is low out there)
+ARC_TOP_M = 0.28  # highest box-bottom height tried for the arc (level grip reaches tool ~35 cm up at 12–27 cm out)
+ARC_RADII_M = (0.22, 0.19, 0.25, 0.16)  # tool point distance from the swivel while swinging high, tried in order
 CLEARANCE = 0.010  # carried box kept this far from other boxes / the tray (m)
 ARM_CLEARANCE = 0.015  # arm links (sampled along their center lines) kept this far from obstacles (m)
 OVER_MARGIN = 0.04  # a carry whose box passes within this of an obstacle's outline on the desk goes OVER it
@@ -178,7 +181,8 @@ def _level(v: np.ndarray) -> np.ndarray:
 def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[str, float], cfg,
                   obstacles: list[Block] | None = None) -> BoxMovePlan:
     """`obstacles`: 3D blocks of the other boxes / the tray, for the landing and carry checks. The carry goes as
-    low as possible: `carry_mm`, then higher (CARRY_HEIGHTS_MM) until it clears everything.
+    low as possible (`carry_mm`); if the swing passes near an obstacle the box goes OVER it — by a higher straight
+    lift if that's low, else by arcing up and in toward the swivel, swinging high and arcing back down.
     Raises PathError if any part is unreachable, over a joint limit, too tilted or would collide."""
     pan_xy = model.pan_xy
     obstacles = obstacles or []
@@ -210,43 +214,86 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.line_to(T_src[:3, 3], bc.down_speed_mm_s, "in level along the tab", orientation_weight=OW)
     b.grip(min_width, f"grip box {box.id}")
     gripped = b.mark()
-    # go OVER anything the carry passes near (tray, other boxes): estimate the swing at the lowest lift, then
-    # start from the height that clears those obstacles' tops
+    z_bottom = float(box_pose(box, src, cfg, pan_xy)[2, 3])  # box bottom at the grasp (on the desk)
+    z_off = float(T_src[2, 3]) - z_bottom  # tool point height above the box bottom
+    # what does the swing pass near? (estimated at the lowest lift) -> how high the box bottom must go to pass OVER
     over, over_what, over_top = 0.0, None, 0.0
     try:
         probe = b.line_by(up * bc.carry_mm / 1000, bc.line_speed_mm_s, "probe", orientation_weight=OW)
         dst_low = T_dst[:3, 3] + up * bc.carry_mm / 1000
         _, poses = best_targets(model, ik, dst_low, T_dst[:3, 2], T_dst[:3, 0], [b.pose, *reach_seeds(model, dst_low)])
-        z_bottom = float(box_pose(box, src, cfg, pan_xy)[2, 3])  # box bottom at the grasp (on the desk)
         over, over_what, over_top = over_height_mm(model, box, probe.path[-1], poses[0], z_bottom, obstacles)
     except PathError:
         pass
-    b.reset(gripped)
-    base = max(bc.carry_mm, over)
-    heights = [base] + [h for h in CARRY_HEIGHTS_MM if h > base + 1]
     errors: list[PathError] = []
-    for lift_mm in heights:  # use vertical space: lowest carry that clears everything
+    lift_mm = bc.carry_mm
+    worst = 0.0
+
+    def lift_up(mm: float) -> dict:
+        b.line_by(up * mm / 1000, bc.line_speed_mm_s, f"lift straight up {mm:.0f} mm", orientation_weight=OW)
+        b.check_holding(min_width, "check holding the box")
+        return b.pose
+
+    def to_dst_up(prev: dict, mm: float, label: str) -> dict:
+        dst_up = T_dst[:3, 3] + up * mm / 1000
+        targets, poses = best_targets(model, ik, dst_up, T_dst[:3, 2], T_dst[:3, 0], [prev, *reach_seeds(model, dst_up)])
+        return b.joint_to(targets[0], label, seeds=poses, targets=targets[:1], speed=cfg.motion.speed / 2).pose
+
+    # 1) direct: short straight lift (higher if the swing passes something low), swing, lower
+    done = False
+    # (if the swing passes near something, only at the height that goes over it — never squeezing past it low)
+    for mm in [max(bc.carry_mm, over)]:
+        if mm > DIRECT_MAX_MM:
+            continue
         b.reset(gripped)
         try:
-            b.line_by(up * lift_mm / 1000, bc.line_speed_mm_s, f"lift straight up {lift_mm:.0f} mm",
-                      orientation_weight=OW)
-            b.check_holding(min_width, "check holding the box")
-            lifted = b.pose
-            dst_up = T_dst[:3, 3] + up * lift_mm / 1000
-            targets, poses = best_targets(model, ik, dst_up, T_dst[:3, 2], T_dst[:3, 0],
-                                          [lifted, *reach_seeds(model, dst_up)])
-            carry = b.joint_to(targets[0], f"carry to above {LOCATION_NAMES[dst]}", seeds=poses, targets=targets[:1],
-                               speed=cfg.motion.speed / 2)
-            worst = check_carry(model, box, lifted, carry.pose, float(T_src[2, 3]), lift_mm / 1000, obstacles)
+            lifted = lift_up(mm)
+            end = to_dst_up(lifted, mm, f"carry to above {LOCATION_NAMES[dst]}")
+            worst = check_carry(model, box, lifted, end, float(T_src[2, 3]), mm / 1000, obstacles)
+            lift_mm, done = mm, True
             break
         except PathError as e:
-            errors.append(e.wrap(f"{lift_mm:.0f} mm: {e}", e.steps or list(b.steps), b.start))
-    else:  # every height's reason; the path/point shown are the lowest attempt's (usually the real cause)
-        why = (f"to go over {over_what} (top {over_top:.0f} mm above the desk) box {box.id} has to be lifted "
-               f"≥ {over:.0f} mm, and no lift from there up to {heights[-1]:.0f} mm works" if over_what
-               else "no carry height works")
+            errors.append(e.wrap(f"direct, {mm:.0f} mm up: {e}", e.steps or list(b.steps), b.start))
+
+    # 2) arc OVER: short straight lift, arc up and IN toward the swivel (the arm reaches much higher there), swing
+    #    around at that height, arc down and out to just above the destination, straight down
+    if not done:
+        az_src = model.azimuth(T_src[:3, 3])
+        az_dst = model.azimuth(T_dst[:3, 3])
+        lowest = max(z_bottom + bc.carry_mm / 1000 + 0.04, (over_top / 1000 + OVER_CLEAR) if over_what else 0.0)
+        for zb in np.arange(lowest, ARC_TOP_M + 1e-9, 0.02):  # box bottom height while swinging, lowest first
+            for r in ARC_RADII_M:  # tool point distance from the swivel while swinging
+                b.reset(gripped)
+                try:
+                    lifted = lift_up(bc.carry_mm)
+                    prev, segs = lifted, []
+                    for az, label in ((az_src, "arc up and in"), (az_dst, "swing around high")):
+                        u = np.array([np.cos(az), np.sin(az), 0.0])
+                        pt = np.array([pan_xy[0], pan_xy[1], 0.0]) + u * r
+                        pt[2] = zb + z_off
+                        targets, poses = best_targets(model, ik, pt, u, T_src[:3, 0], [prev, *reach_seeds(model, pt)])
+                        q = b.joint_to(targets[0], label, seeds=poses, targets=targets[:1],
+                                       speed=cfg.motion.speed / 2).pose
+                        segs.append((prev, q))
+                        prev = q
+                    end = to_dst_up(prev, bc.carry_mm, f"arc down and out to above {LOCATION_NAMES[dst]}")
+                    segs.append((prev, end))
+                    worst = max(check_carry(model, box, a, c, float(T_src[2, 3]), bc.carry_mm / 1000, obstacles)
+                                for a, c in segs)
+                    lift_mm, done = (zb - z_bottom) * 1000, True
+                    break
+                except PathError as e:
+                    errors.append(e.wrap(f"arc at {zb * 1000:.0f} mm / {r * 100:.0f} cm: {e}", e.steps or list(b.steps),
+                                         b.start))
+            if done:
+                break
+    if not done:  # the path/point shown are the first attempt's
+        why = (f"to go over {over_what} (top {over_top:.0f} mm) box {box.id} has to get its bottom ≥ "
+               f"{over_top + OVER_CLEAR * 1000:.0f} mm up, and no direct lift or arc up to {ARC_TOP_M * 1000:.0f} mm "
+               f"works" if over_what else "no carry works")
         raise errors[0].wrap(f"{why} — " + "; ".join(str(e) for e in errors[:4]) + (" …" if len(errors) > 4 else ""))
-    land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {lift_mm:.0f} mm to the table (same height as picked)",
+    down_mm = bc.carry_mm if lift_mm > DIRECT_MAX_MM or b.steps[-1].label.startswith("arc") else lift_mm
+    land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {down_mm:.0f} mm to the table (same height as picked)",
                      orientation_weight=OW)
     land_tilt = box_tilt_deg(model.fk(land.path[-1]), box.tool_in_box)
     if land_tilt > MAX_LAND_TILT_DEG:
