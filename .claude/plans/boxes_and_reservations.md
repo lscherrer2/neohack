@@ -99,3 +99,13 @@ the arm can't reach at tab height at all — loosening orientation doesn't help;
 box: fingertips 6 mm past the grip point + ~15 mm of tab toward the arm). Now `boxes.min_center_mm` 305: Add box
 refuses closer boxes and box moves fail early with "slide it N cm further out, then remove and re-add it".
 
+### Change 2026-11-07 (later): pack spot 355, adaptive retreat, path view
+- "no carry height up to 220 mm works: … joint jump" showed only the LAST height's error; now every height's
+  reason is listed (and the path/point shown are the lowest attempt's).
+- User suspected the pack spot was too close — confirmed: at 345 mm a grip 16–20 mm from the wall fails the
+  back-out (same error as on the arm). The retreat after drops (fixed 12 cm above the rim) broke further out;
+  now it tries 120/90/60/40 mm above the rim, up to 6 cm back toward the arm, gripper down or as it is. Pack spot
+  355 mm then works for grips 8, 16 and 20 mm from the wall (all 33 pockets); 365+ loses the drops.
+- Planned-path view (user request): dry runs return the tool-point path; failures return how far the plan got and
+  where it failed; drawn in both 3D views.
+

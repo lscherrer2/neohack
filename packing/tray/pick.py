@@ -192,7 +192,7 @@ def plan_pick(model: ArmModel, pocket: str, sku: str, point_m: np.ndarray, norma
     close_dir = np.asarray(close_dir, float)
     pitches = np.arange(0.0, s.max_pitch_deg + 1e-9, s.pitch_step_deg)
     pulls = sorted({s.pull_mm, s.extract_mm}, reverse=True)
-    errors = []
+    errors: list[PathError] = []
     for pull in pulls:
         for pitch in pitches:
             # the fixed jaw can be on either side of the part (wrist roll 180° apart): plan both, keep the one
@@ -202,11 +202,11 @@ def plan_pick(model: ArmModel, pocket: str, sku: str, point_m: np.ndarray, norma
                 try:
                     plans.append(_plan_one(model, pocket, sku, c, n, jaw_x, current, s, float(pitch), pull))
                 except PathError as e:
-                    errors.append(f"pitch {pitch:.0f}°/pull {pull:.0f} mm: {e}")
+                    errors.append(e.wrap(f"pitch {pitch:.0f}°/pull {pull:.0f} mm: {e}"))
             if plans:
                 return min(plans, key=lambda pl: abs(pl.steps[1].pose["wrist_roll"]))
-    raise PathError(f"no tool pitch up to {s.max_pitch_deg:.0f}° fits a {pulls[-1]:.0f} mm pull-out from "
-                    f"{pocket}. Last: {errors[-1]}")
+    raise errors[-1].wrap(f"no tool pitch up to {s.max_pitch_deg:.0f}° fits a {pulls[-1]:.0f} mm pull-out from "
+                          f"{pocket}. Last: {errors[-1]}")
 
 
 def _plan_one(model, pocket, sku, c, n, jaw_x, current, s, pitch, pull) -> PickPlan:
@@ -247,7 +247,7 @@ def _plan_one(model, pocket, sku, c, n, jaw_x, current, s, pitch, pull) -> PickP
         except PathError:
             b.reset(m)
     if not lift:
-        raise PathError(f"can't lift even {s.lift_mm / 3:.0f} mm after the pull-out")
+        raise PathError(f"can't lift even {s.lift_mm / 3:.0f} mm after the pull-out", b.tip, list(b.steps), b.start)
     b.check_holding(s.min_grip, "check holding after lift")
     R_grasp = model.fk(line_in.path[-1])[:3, :3]
     tilt = _angle(R_grasp[:, 2], -n)

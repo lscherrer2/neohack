@@ -3,6 +3,8 @@ import { api, ApiError, errText } from "../api";
 import type { TrayLoad } from "../App";
 import { liveStatus, useArmLive } from "../arm/useArmLive";
 import { useBoxes } from "../arm/useBoxes";
+import PathOverlay from "../arm/PathOverlay";
+import { usePlannedPath } from "../arm/plannedPath";
 import { ArmStatus } from "../calibration/Panel";
 import Scene from "../calibration/Scene";
 import type { ArmState } from "../types";
@@ -16,6 +18,7 @@ import ProcedureBox from "./ProcedureBox";
  */
 export default function ControlsTab({ trayLoad }: { trayLoad: TrayLoad }) {
   const { arm, stale, stream, applyArm } = useArmLive();
+  const planned = usePlannedPath();
   const { boxes, reload: reloadBoxes } = useBoxes();
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -42,8 +45,9 @@ export default function ControlsTab({ trayLoad }: { trayLoad: TrayLoad }) {
   return (
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
-        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={null} highlighted={highlighted} boxes={boxes} />
+        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={null} highlighted={highlighted} boxes={boxes} planned={planned} />
         <div className="scene-status"><span className={`dot ${status.dot}`} />{status.text}</div>
+        <PathOverlay />
       </section>
       <div className="panel stack">
         {error && (

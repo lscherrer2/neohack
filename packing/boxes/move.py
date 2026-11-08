@@ -106,15 +106,15 @@ def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float, lif
         T = model.fk({j: a[j] + (b[j] - a[j]) * s for j in a})
         if T[2, 3] < z_grasp + lift_m / 2:
             raise PathError(f"carrying box {box.id} would dip to {(T[2, 3] - z_grasp) * 1000:.0f} mm above its "
-                            f"grasp height")
+                            f"grasp height", T[:3, 3])
         tilt = box_tilt_deg(T, box.tool_in_box)
         worst = max(worst, tilt)
         if tilt > MAX_CARRY_TILT_DEG:
-            raise PathError(f"carrying box {box.id} would tilt it {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)")
+            raise PathError(f"carrying box {box.id} would tilt it {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)", T[:3, 3])
         carried = box_block(T @ tool_in_box_inv)
         for ob in obstacles:
             if blocks_intersect(carried, ob, CLEARANCE / 2):
-                raise PathError(f"carrying box {box.id} would hit {ob.name} ({s:.0%} of the way)")
+                raise PathError(f"carrying box {box.id} would hit {ob.name} ({s:.0%} of the way)", T[:3, 3])
     return worst
 
 
@@ -144,10 +144,11 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     T_land_box = box_pose(box, dst, cfg, pan_xy)
     for where in (src, dst):
         if why := too_close(box_pose(box, where, cfg, pan_xy), pan_xy, cfg):
-            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(where, where)} {why}, then remove and re-add it")
+            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(where, where)} {why}, then remove and re-add it",
+                            box_pose(box, where, cfg, pan_xy)[:3, 3])
     for ob in obstacles:
         if blocks_intersect(box_block(T_land_box), ob, 0.0025):
-            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(dst, dst)} would overlap {ob.name}")
+            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(dst, dst)} would overlap {ob.name}", T_land_box[:3, 3])
     bc, g = cfg.boxes, cfg.gripper
     T_src = box_pose(box, src, cfg, pan_xy) @ box.tool_in_box
     T_dst = T_land_box @ box.tool_in_box
@@ -169,7 +170,7 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.grip(min_width, f"grip box {box.id}")
     gripped = b.mark()
     heights = [bc.carry_mm] + [h for h in CARRY_HEIGHTS_MM if h > bc.carry_mm]
-    last_err: PathError | None = None
+    errors: list[PathError] = []
     for lift_mm in heights:  # use vertical space: lowest carry that clears everything
         b.reset(gripped)
         try:
@@ -185,15 +186,15 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             worst = check_carry(model, box, lifted, carry.pose, float(T_src[2, 3]), lift_mm / 1000, obstacles)
             break
         except PathError as e:
-            last_err = e
-    else:
-        raise PathError(f"no carry height up to {heights[-1]:.0f} mm works: {last_err}")
+            errors.append(e.wrap(f"{lift_mm:.0f} mm: {e}", e.steps or list(b.steps), b.start))
+    else:  # every height's reason; the path/point shown are the lowest attempt's (usually the real cause)
+        raise errors[0].wrap("no carry height works — " + "; ".join(str(e) for e in errors))
     land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {lift_mm:.0f} mm to the table (same height as picked)",
                      orientation_weight=OW)
     land_tilt = box_tilt_deg(model.fk(land.path[-1]), box.tool_in_box)
     if land_tilt > MAX_LAND_TILT_DEG:
         raise PathError(f"setting box {box.id} down at {LOCATION_NAMES.get(dst, dst)} would tilt it {land_tilt:.0f}° "
-                        f"(max {MAX_LAND_TILT_DEG:.0f}°)")
+                        f"(max {MAX_LAND_TILT_DEG:.0f}°)", T_dst[:3, 3], list(b.steps), b.start)
     b.open_gripper("release the box", open_value)
     b.line_by(-_level(T_dst[:3, 2]) * bc.approach_mm / 1000, bc.line_speed_mm_s, "back out level along the tab",
               orientation_weight=OW)

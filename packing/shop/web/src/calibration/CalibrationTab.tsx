@@ -3,6 +3,8 @@ import { api, ApiError, errText, usePoll } from "../api";
 import type { TrayLoad } from "../App";
 import { type Avail, liveStatus, useArmLive } from "../arm/useArmLive";
 import { useBoxes } from "../arm/useBoxes";
+import PathOverlay from "../arm/PathOverlay";
+import { usePlannedPath } from "../arm/plannedPath";
 import BoxesBox from "./BoxesBox";
 import type { ArmState, CalSession } from "../types";
 import Panel from "./Panel";
@@ -12,6 +14,7 @@ export type { Avail };
 
 export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
   const { arm, stale, stream, applyArm } = useArmLive();
+  const planned = usePlannedPath();
   const { boxes, apply: applyBoxes } = useBoxes();
 
   // ---- calibration session
@@ -60,8 +63,9 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
         <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={cal.data} highlighted={highlighted}
-               boxes={boxes} />
+               boxes={boxes} planned={planned} />
         <div className="scene-status"><span className={`dot ${status.dot}`} />{status.text}</div>
+        <PathOverlay />
       </section>
       <Panel arm={arm} stale={stale} cal={cal} tray={trayLoad.tray} trayMissing={trayLoad.missing}
              target={target} setTarget={setTarget} highlighted={highlighted}

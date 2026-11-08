@@ -27,7 +27,22 @@ HALF_TURN = 2047  # raw reading at the calibration pose (= URDF zero), set by ca
 
 
 class PathError(RuntimeError):
-    """Line can't be followed (unreachable, joint limit, or IK jump)."""
+    """A motion can't be planned (unreachable, joint limit, IK jump, collision ...).
+
+    For showing where it failed: `point` = robot-frame xyz (m) of the failure, if known; `steps` + `start` = the
+    motion program planned up to there (packing/motion/program.py), if known."""
+
+    def __init__(self, message: str, point=None, steps=None, start=None):
+        super().__init__(message)
+        self.point = None if point is None else [round(float(v), 5) for v in point]
+        self.steps, self.start = steps, start
+
+    def wrap(self, message: str, steps=None, start=None) -> "PathError":
+        """Same failure under a broader message; keeps the point, adds the steps planned before it."""
+        e = PathError(message, self.point, steps if steps is not None else self.steps,
+                      start if start is not None else self.start)
+        e.__cause__ = self
+        return e
 
 
 def load_ranges(robot_id: str) -> dict[str, tuple[int, int, int]]:
@@ -78,6 +93,13 @@ class PlacoKinematics:
         self.solver.solve(True)
         self.robot.update_kinematics()
         return np.rad2deg([self.robot.get_joint(name) for name in self.joints])
+
+
+def _partial(path: list) -> object:
+    """The part of a straight line planned before it failed, as a step for path display."""
+    from .program import LineMove
+
+    return LineMove(list(path), 0.0, 1.0, "planned part of the line")
 
 
 # ---------- rotation helpers (no scipy) ----------
@@ -245,13 +267,14 @@ class ArmModel:
             pose, err = self.ik(seed, T, orientation_weight=orientation_weight)
             where = f"at {s:.0%} of the line ({np.round(T[:3, 3] * 1000, 1)} mm)"
             if err > max_err_m:
-                raise PathError(f"unreachable {where}: IK off by {err * 1000:.1f} mm")
+                raise PathError(f"unreachable {where}: IK off by {err * 1000:.1f} mm", T[:3, 3], [_partial(path)], start)
             out_of_range = {j: round(v, 1) for j, v in pose.items() if abs(v) > limit}
             if out_of_range:
-                raise PathError(f"joint limit {where}: {out_of_range}")
+                raise PathError(f"joint limit {where}: {out_of_range}", T[:3, 3], [_partial(path)], start)
             jump = max(abs(pose[j] - seed[j]) for j in BODY)
             if jump > max_joint_step:
-                raise PathError(f"joint jump of {jump:.1f} units {where} (near a singularity?)")
+                raise PathError(f"joint jump of {jump:.1f} units {where} (near a singularity?)", T[:3, 3],
+                                [_partial(path)], start)
             path.append(pose)
             seed = pose
         return path

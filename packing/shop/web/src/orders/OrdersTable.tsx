@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errText } from "../api";
+import { showFailed, showPlanned } from "../arm/plannedPath";
 import type { Order, ShopState } from "../types";
 
 const WORDS: Record<string, string> = {
@@ -21,10 +22,13 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
     try {
       const r = await api<{ plan: { box_id: number; items: { pocket: string; drop_tilt_deg: number }[] } }>(
         "POST", `/api/orders/${o.id}/pack-plan`);
+      showPlanned(`pack order ${o.id}`, r);
       setChecks((c) => ({ ...c, [o.id]: { ok: true,
-        text: `OK: box ${r.plan.box_id}, ${r.plan.items.map((i) => i.pocket).join(", ")} — the arm can pack it` } }));
+        text: `OK: box ${r.plan.box_id}, ${r.plan.items.map((i) => i.pocket).join(", ")} — the arm can pack it ` +
+              "(path shown on the Controls tab)" } }));
     } catch (e) {
-      setChecks((c) => ({ ...c, [o.id]: { ok: false, text: errText(e) } }));
+      showFailed(`pack order ${o.id}`, e);
+      setChecks((c) => ({ ...c, [o.id]: { ok: false, text: errText(e) + " (see where on the Controls tab)" } }));
     }
   }
 

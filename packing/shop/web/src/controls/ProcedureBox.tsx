@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { showFailed, showPlanned } from "../arm/plannedPath";
 import { api, errText, usePoll } from "../api";
 import ConfirmDialog from "../calibration/ConfirmDialog";
 import type { ArmState, TrayState } from "../types";
@@ -55,13 +56,17 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
     return pk ? `${name(pk.sku)} ${id.split("_").pop()}` : id;
   };
 
-  async function act<T>(what: typeof busy, url: string, body?: unknown): Promise<T | null> {
+  /** `pathTitle`: a dry run — show its planned path (or where it fails) in the 3D view. */
+  async function act<T>(what: typeof busy, url: string, body?: unknown, pathTitle?: string): Promise<T | null> {
     setBusy(what);
     setError(null);
     try {
-      return await api<T>("POST", url, body);
+      const r = await api<T>("POST", url, body);
+      if (pathTitle) showPlanned(pathTitle, r);
+      return r;
     } catch (e) {
       setError(errText(e));
+      if (pathTitle) showFailed(pathTitle, e);
       return null;
     } finally {
       setBusy(null);
@@ -112,7 +117,7 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
               <button type="button" className="act" disabled={!canPlan || !pocket || busy !== null}
                       title={canPlan ? "Plan the pick, then confirm" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
                       onClick={async () => {
-                        const r = await act<PickReply>("plan", "/api/arm/pick", { pocket });
+                        const r = await act<PickReply>("plan", "/api/arm/pick", { pocket }, `pick ${pretty(pocket)}`);
                         if (r) setPlan(r);
                       }}>
                 {busy === "plan" ? "Planning…" : "Pick…"}

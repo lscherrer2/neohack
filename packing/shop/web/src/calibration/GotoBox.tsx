@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { showFailed, showPlanned } from "../arm/plannedPath";
 import { api, errText } from "../api";
 import type { ArmState, CalSession, TrayState } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
@@ -33,13 +34,17 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
   const label = (id: string) =>
     tray?.corners?.find((c) => c.id === id)?.label ?? id;
 
-  async function act<T>(what: typeof busy, url: string, body?: unknown): Promise<T | null> {
+  /** `pathTitle`: a dry run — show its planned path (or where it fails) in the 3D view. */
+  async function act<T>(what: typeof busy, url: string, body?: unknown, pathTitle?: string): Promise<T | null> {
     setBusy(what);
     setError(null);
     try {
-      return await api<T>("POST", url, body);
+      const r = await api<T>("POST", url, body);
+      if (pathTitle) showPlanned(pathTitle, r);
+      return r;
     } catch (e) {
       setError(errText(e));
+      if (pathTitle) showFailed(pathTitle, e);
       return null;
     } finally {
       setBusy(null);
@@ -48,7 +53,8 @@ export default function GotoBox({ arm, tray, session, setTarget }: {
 
   async function planMove() {
     setTarget(point);
-    const r = await act<GotoReply>("plan", "/api/arm/goto", { point, standoff_mm: standoffIn * INCH_MM });
+    const r = await act<GotoReply>("plan", "/api/arm/goto", { point, standoff_mm: standoffIn * INCH_MM },
+                                  `go to ${label(point)}`);
     if (r) setPlan(r);
   }
 

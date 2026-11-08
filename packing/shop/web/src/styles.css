@@ -164,6 +164,23 @@ pre { margin: 0; padding: 8px 10px; background: var(--panel); border-radius: 3px
 .dot-off { background: var(--alarm); }
 .scene-label { font: 600 .78rem var(--text); white-space: nowrap; pointer-events: none; user-select: none;
                padding: 2px 7px; border-radius: 3px; }
+.fail-label { background: var(--alarm); color: #fff; }
+.path-overlay { position: absolute; left: 12px; right: 12px; bottom: 10px; padding: 8px 10px; font-size: .85rem;
+                background: rgba(247, 249, 251, .94); border: 1px solid var(--rule); border-left: 4px solid #1F6FB2;
+                border-radius: 4px; max-height: 40%; overflow: auto; }
+.path-overlay.failed { border-left-color: var(--alarm); }
+.path-title { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.path-title .linkish { margin-left: auto; }
+.path-why { color: #7a1f17; margin-top: 4px; }
+.path-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; color: var(--muted); }
+.path-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.lg { display: inline-block; width: 18px; height: 0; border-top: 3px solid; }
+.lg.free { border-top: 2px dashed #5B6875; }
+.lg.line { border-color: #1F6FB2; }
+.lg.grip, .lg.release, .lg.fail { width: 9px; height: 9px; border: 0; border-radius: 50%; }
+.lg.grip { background: var(--ok); }
+.lg.release { background: #D9822B; }
+.lg.fail { background: var(--alarm); }
 .box-label { color: #fff; background: var(--steel); }
 .box-label.box-in_use { background: var(--safety); color: var(--ink); }
 .box-label.box-packed { background: var(--ok); }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { showFailed, showPlanned } from "../arm/plannedPath";
 import { api, errText } from "../api";
 import ConfirmDialog from "../calibration/ConfirmDialog";
 import type { ArmState, BoxesState, BoxInfo } from "../types";
@@ -30,13 +31,17 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
   const moving = arm?.mode === "moving";
   const canPlan = !!arm?.connected && arm.mode === "idle" && !!box;
 
-  async function post<T>(what: typeof busy, url: string, body?: unknown): Promise<T | null> {
+  /** `pathTitle`: a dry run — show its planned path (or where it fails) in the 3D view. */
+  async function post<T>(what: typeof busy, url: string, body?: unknown, pathTitle?: string): Promise<T | null> {
     setBusy(what);
     setError(null);
     try {
-      return await api<T>("POST", url, body);
+      const r = await api<T>("POST", url, body);
+      if (pathTitle) showPlanned(pathTitle, r);
+      return r;
     } catch (e) {
       setError(errText(e));
+      if (pathTitle) showFailed(pathTitle, e);
       return null;
     } finally {
       setBusy(null);
@@ -75,7 +80,8 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
               <button type="button" className="act" disabled={!canPlan || busy !== null}
                       title={canPlan ? "Plan the move, then confirm" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
                       onClick={async () => {
-                        const r = await post<MoveReply>("plan", "/api/arm/box-move", { box_id: box!.id, to });
+                        const r = await post<MoveReply>("plan", "/api/arm/box-move", { box_id: box!.id, to },
+                                                        `move box ${box!.id} ${DEST[to]}`);
                         if (r) setPlan(r);
                       }}>{busy === "plan" ? "Planning…" : "Move…"}</button>
             )}

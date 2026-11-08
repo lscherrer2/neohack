@@ -72,19 +72,20 @@ def plan_drop(model: ArmModel, b: ProgramBuilder, T_box: np.ndarray, length_mm: 
         q, T = poses[0], model.fk(poses[0])
         zt = T[:3, 2]
         if zt[2] > -0.05:
-            raise PathError(f"{label}: can't point the gripper down over the box")
+            raise PathError(f"{label}: can't point the gripper down over the box", p, list(b.steps), b.start)
         # lowest point must clear the floor: the part ends at p + L * zt
         p = np.array([center[0] - zt[0] * L / 2, center[1] - zt[1] * L / 2,
                       max(top + RIM_CLEAR_MM / 1000, floor + DROP_ABOVE_FLOOR_MM / 1000 - zt[2] * L)])
     targets, poses = best_targets(model, ik, p, down, any_dir, [q, *down_seeds(model, p)])
     T = model.fk(poses[0])
     if np.linalg.norm(T[:3, 3] - p) > 0.002:
-        raise PathError(f"{label}: can't reach the drop point over the box ({np.round(p * 1000, 1)} mm)")
+        raise PathError(f"{label}: can't reach the drop point over the box ({np.round(p * 1000, 1)} mm)", p,
+                        list(b.steps), b.start)
     zt = T[:3, 2]
     # no wall check (user: the walls are ~0.5 mm): the part is centered over the opening, its end above the floor
     end = T[:3, 3] + zt * L
     if end[2] < floor + DROP_ABOVE_FLOOR_MM / 2000:
-        raise PathError(f"{label}: the part would touch the box floor")
+        raise PathError(f"{label}: the part would touch the box floor", end, list(b.steps), b.start)
     b.joint_to(targets[0], f"{label}: over the box", seeds=poses, targets=targets[:1])
     b.open_gripper(f"{label}: release", open_value)
     retreat_up(model, b, T_box, f"{label}: up and away from the box")
@@ -92,14 +93,29 @@ def plan_drop(model: ArmModel, b: ProgramBuilder, T_box: np.ndarray, length_mm: 
 
 
 def retreat_up(model: ArmModel, b: ProgramBuilder, T_box: np.ndarray, label: str) -> None:
-    """Straight up to RETREAT_MM above the box rim (exact position, gripper as close to pointing down as it
-    can) — so the next free move starts well clear of the box."""
-    p = b.tip.copy()
-    p[2] = max(p[2] + 0.03, float(T_box[2, 3]) + BOX_H + RETREAT_MM / 1000)
+    """Up and away from the box after letting go, so the next free move starts clear of it. Tries the highest
+    reachable spot (RETREAT_MM … 40 mm above the rim), optionally a bit back toward the arm (always away from the
+    box's far side), gripper pointing down if it can, else kept as it is."""
+    from ..motion.program import JointMove
+
+    tip, R = b.tip.copy(), model.fk(b.pose)[:3, :3]
+    inward = np.array([*(model.pan_xy - tip[:2]), 0.0])
+    inward /= max(np.linalg.norm(inward), 1e-9)
+    rim = float(T_box[2, 3]) + BOX_H
     ik = AxisIK(model)
-    targets, poses = best_targets(model, ik, p, np.array([0.0, 0.0, -1.0]), model.fk(b.pose)[:3, 0],
-                                  [b.pose, *down_seeds(model, p)])
-    b.joint_to(targets[0], label, seeds=poses, targets=targets[:1])
+    last = None
+    for h in (RETREAT_MM, 90.0, 60.0, 40.0):
+        for back in (0.0, 0.03, 0.06):
+            p = tip + inward * back
+            p[2] = max(tip[2] + 0.02, rim + h / 1000)
+            for z_axis in (np.array([0.0, 0.0, -1.0]), R[:, 2]):
+                try:
+                    targets, poses = best_targets(model, ik, p, z_axis, R[:, 0], [b.pose, *down_seeds(model, p)])
+                    b.joint_to(targets[0], label, seeds=poses, targets=targets[:1])
+                    return
+                except PathError as e:
+                    last = e
+    raise (last or PathError("")).wrap(f"{label}: no reachable spot above the box ({last})", list(b.steps), b.start)
 
 
 BOX_CLEAR_MM = 10.0  # arm / part kept this far outside the box at the pack spot (except the drop itself)
@@ -139,7 +155,7 @@ def check_clear_of_box(model: ArmModel, steps: list[Step], T_box: np.ndarray, pa
             for pt in pts:
                 b = R_inv @ (pt - t)
                 if np.all(b > lo) and np.all(b < hi):
-                    raise PathError(f"{label}: '{st.label}' would hit the box at the pack spot")
+                    raise PathError(f"{label}: '{st.label}' would hit the box at the pack spot", pt)
         if isinstance(st, LineMove):
             prev = st.path[-1]
         elif isinstance(st, JointMove) or isinstance(st, _Start):
@@ -147,7 +163,7 @@ def check_clear_of_box(model: ArmModel, steps: list[Step], T_box: np.ndarray, pa
 
 
 def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, float],
-                    obstacles: list[tuple[str, np.ndarray]] | None = None) -> PackPlan:
+                    obstacles: list | None = None) -> PackPlan:
     """`order.slots` = the reserved pocket per item (all must be set). `box` = the order's box (at supply or
     already at the pack spot when resuming). Raises PathError / ValueError."""
     if not order.slots or None in order.slots:
@@ -165,29 +181,48 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
                 return st.pose
         return pose
 
+    def failed(e: PathError, sub_steps=None) -> PathError:
+        """The failure with the whole order's path up to it (sub-plan steps continue from the current end)."""
+        return e.wrap(str(e), steps + list(sub_steps if sub_steps is not None else (e.steps or [])), current)
+
     T_box = box_pose(box, "pack", cfg, model.pan_xy)
-    if box.location != "pack":
-        mv = plan_box_move(model, box, box.location, "pack", pose, cfg, obstacles)
-        steps += mv.steps
-        pose = last_pose(mv.steps)
-    b0 = ProgramBuilder(model, pose)
-    retreat_up(model, b0, T_box, "up and away from the box")
+    try:
+        if box.location != "pack":
+            mv = plan_box_move(model, box, box.location, "pack", pose, cfg, obstacles)
+            steps += mv.steps
+            pose = last_pose(mv.steps)
+        b0 = ProgramBuilder(model, pose)
+        retreat_up(model, b0, T_box, "up and away from the box")
+    except PathError as e:
+        raise failed(e) from e
     steps += b0.steps
     pose = b0.pose
     lengths = {t.sku: t.length_mm for t in cfg.tray.types}
     items = []
     for i, slot in enumerate(order.slots):
-        pick = plan_pocket_pick(model, cfg.tray, cfg.gripper, cal, slot, pose)
-        check_clear_of_box(model, [_Start(pose), *pick.steps], T_box, lengths.get(pick.sku, 60.0) / 1000,
-                           f"item {i + 1} ({pick.sku} from {slot})")
-        steps += pick.steps
+        what = f"item {i + 1} ({slot})"
+        try:
+            pick = plan_pocket_pick(model, cfg.tray, cfg.gripper, cal, slot, pose)
+        except PathError as e:
+            raise failed(e.wrap(f"{what}: {e}")) from e
+        try:
+            check_clear_of_box(model, [_Start(pose), *pick.steps], T_box, lengths.get(pick.sku, 60.0) / 1000,
+                               f"item {i + 1} ({pick.sku} from {slot})")
+        except PathError as e:
+            raise failed(e, pick.steps) from e
         b = ProgramBuilder(model, last_pose(pick.steps))
-        tilt = plan_drop(model, b, T_box, lengths.get(pick.sku, 60.0), pick.open_value,
-                         f"item {i + 1} ({pick.sku} from {slot})")
-        steps += b.steps
+        try:
+            tilt = plan_drop(model, b, T_box, lengths.get(pick.sku, 60.0), pick.open_value,
+                             f"item {i + 1} ({pick.sku} from {slot})")
+        except PathError as e:
+            raise failed(e, list(pick.steps) + list(e.steps or [])) from e
+        steps += pick.steps + b.steps
         pose = b.pose
         items.append({"pocket": slot, "sku": pick.sku, "pitch_deg": pick.pitch_deg, "drop_tilt_deg": round(tilt, 1)})
-    out = plan_box_move(model, box, "pack", "output", pose, cfg, obstacles)
+    try:
+        out = plan_box_move(model, box, "pack", "output", pose, cfg, obstacles)
+    except PathError as e:
+        raise failed(e) from e
     steps += out.steps
     if not any(isinstance(s, OpenGripper) for s in steps):
         raise AssertionError("no release step")  # can't happen: every drop and box move opens

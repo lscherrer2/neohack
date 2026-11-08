@@ -165,7 +165,7 @@ class PlanTests(unittest.TestCase):
 
     def test_refuses_collisions_and_tilted_landings(self):
         box = make_box(0.32, 0.16)
-        blocker = box_block(box_frame((0.345, 0.0), 0.0, PAN), "box 2")  # sitting on the pack spot
+        blocker = box_block(box_frame((0.355, 0.0), 0.0, PAN), "box 2")  # sitting on the pack spot
         with self.assertRaises(PathError) as e:
             plan_box_move(MODEL, box, "supply", "pack", HOME, self.cfg, [blocker])
         self.assertIn("overlap box 2", str(e.exception))
@@ -233,7 +233,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(st["last"]["status"], "done", st)
         b2 = self.http.get("/api/boxes").json()["boxes"][0]
         self.assertEqual(b2["location"], "pack")
-        np.testing.assert_allclose(np.array(b2["pose"])[:2, 3], [0.345, 0.0], atol=1e-6)
+        np.testing.assert_allclose(np.array(b2["pose"])[:2, 3], [0.355, 0.0], atol=1e-6)
         self.assertEqual(self.http.delete(f"/api/boxes/{b['id']}").status_code, 200)
         self.assertEqual(self.http.get("/api/boxes").json()["boxes"], [])
 

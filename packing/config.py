@@ -106,9 +106,10 @@ class BoxesCfg:
     """Packing boxes (packing/boxes/): calibration grip estimate, pack spot, carry motion."""
 
     grip_from_wall_mm: float = 8.0  # tool point out from the box wall along the tab (jaws closed up/down on it)
-    pack_spot_mm: tuple[float, float] = (345.0, 0.0)  # box center (robot x, y) where orders are packed. The level
+    pack_spot_mm: tuple[float, float] = (355.0, 0.0)  # box center (robot x, y) where orders are packed. The level
     # tab grip (gripper pointing away along the tab) only reaches with the grip point >= ~25 cm from the swivel
-    # -> box centers >= ~30 cm out (345: grip point at 26 cm). Further out, drops over the box get unreachable
+    # -> box centers >= ~30 cm out. 355 works for grips 8–20 mm from the wall (345 failed deeper grips' back-out;
+    # 365+ loses the drops over the box)
     carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging, clears neighbours)
     min_center_mm: float = 305.0  # box center at least this far from the swivel: closer, the level approach /
     # back-out along the tab runs into the arm's reach limit (sim: 304 ok, 302 fails)

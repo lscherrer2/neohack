@@ -164,11 +164,16 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   2 mm / wall ~0.5 mm), straight up 30 mm — or higher (60…220 mm) until the carry clears everything — joint-space
   carry checked in **3D** (box block vs other boxes + tray plate/parts + the space under it; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
-  box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (345, 0) mm (grip point 26 cm out; further
-  out the drops get unreachable), each reserved part picked + dropped (centered over the opening, jaws above the
+  box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;
+  345 failed deeper grips, 365+ the drops), each reserved part picked + dropped (centered over the opening, jaws above the
   rim, end above the floor; no wall check), box → its supply spot mirrored right. Tray goes on the LEFT.
   `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
   Orders → Check). Part `length_mm` per tray type = estimates (drop height).
+- **Planned-path view**: every dry run (pick, box move, go-to, order Check) returns `path` = tool-point segments
+  (`program.tip_path`: free / line / grip / release); a failed plan returns 422 with detail `{message, path,
+  fail_m}` (`PathError.point/.steps/.start`, kept through `PathError.wrap` by every planner layer). Both 3D views
+  draw it (dashed = free move, blue = straight line, green = grip, orange = release, red = fails here) with a
+  legend + Clear (`web/src/arm/plannedPath.ts`, `PathOverlay.tsx`).
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.

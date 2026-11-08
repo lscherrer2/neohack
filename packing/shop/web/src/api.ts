@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 /** A failed request. `status` 0 = network error (server unreachable). */
 export class ApiError extends Error {
-  constructor(public status: number, public detail: string) {
+  /** `data`: the raw `detail` when it's an object (e.g. a failed plan: {message, path, fail_m}). */
+  constructor(public status: number, public detail: string, public data: unknown = null) {
     super(detail);
   }
   /** Endpoint missing or backend part not running yet: show "not available", not an error. */
@@ -13,6 +14,7 @@ export class ApiError extends Error {
 
 function detailText(d: unknown, status: number): string {
   if (typeof d === "string") return d;
+  if (d && typeof d === "object" && "message" in d) return String((d as { message: unknown }).message);
   if (Array.isArray(d)) // FastAPI validation errors
     return d.map((e) => (e && typeof e === "object" && "msg" in e ? String((e as { msg: unknown }).msg) : JSON.stringify(e))).join("; ");
   if (d != null) return JSON.stringify(d);
@@ -31,7 +33,8 @@ export async function api<T>(method: string, url: string, body?: unknown): Promi
     throw new ApiError(0, "Couldn't reach the shop server.");
   }
   const data = await r.json().catch(() => null);
-  if (!r.ok) throw new ApiError(r.status, detailText(data?.detail, r.status));
+  if (!r.ok) throw new ApiError(r.status, detailText(data?.detail, r.status),
+                                typeof data?.detail === "object" ? data.detail : null);
   return data as T;
 }
 

@@ -3,6 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useMemo, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import { itemColor } from "../api";
+import type { PlannedPath } from "../arm/plannedPath";
 import type { ArmState, BoxesState, BoxInfo, CalSession, Mat4, Pocket, TrayState, Vec3 } from "../types";
 
 // Robot base frame: x forward, y left, z up, meters. three.js is y-up, so everything robot-side lives
@@ -273,6 +274,44 @@ function PackSpot({ xy, g }: { xy: [number, number]; g: BoxesState["geometry"] }
                dashSize={0.008} gapSize={0.006} />;
 }
 
+// ---------------------------------------------------------------- planned path (dry runs)
+const PATH_COLOR = { free: "#5B6875", line: "#1F6FB2", grip: C.ok, release: "#D9822B", fail: "#C8372D" };
+
+/** The tool point's planned path: free moves dashed grey, straight lines solid blue, grips green, releases
+ *  orange, start ring, and a red marker where planning failed. Robot frame. */
+function PlannedPathView({ path }: { path: PlannedPath }) {
+  const first = path.segments.find((s) => s.points.length)?.points[0];
+  return (
+    <group>
+      {path.segments.map((s, i) => {
+        if ((s.kind === "free" || s.kind === "line") && s.points.length > 1)
+          return <Line key={i} points={s.points} color={PATH_COLOR[s.kind]} lineWidth={s.kind === "line" ? 3 : 2}
+                       dashed={s.kind === "free"} dashSize={0.01} gapSize={0.007} />;
+        if (s.kind === "grip" || s.kind === "release")
+          return (
+            <mesh key={i} position={s.points[0]}>
+              <sphereGeometry args={[0.006, 14, 10]} />
+              <meshStandardMaterial color={PATH_COLOR[s.kind]} />
+            </mesh>
+          );
+        return null;
+      })}
+      {first && (
+        <mesh position={first}>
+          <torusGeometry args={[0.009, 0.0022, 8, 24]} />
+          <meshStandardMaterial color={C.ink} />
+        </mesh>
+      )}
+      {path.fail && (
+        <mesh position={path.fail}>
+          <sphereGeometry args={[0.011, 18, 14]} />
+          <meshStandardMaterial color={PATH_COLOR.fail} emissive={PATH_COLOR.fail} emissiveIntensity={0.4} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 /** tray frame point (mm) -> three.js world, through the tray -> robot matrix (meters). */
 function trayToWorld(m: Mat4, xmm: number, ymm: number, zmm: number) {
   const v = [xmm / 1000, ymm / 1000, zmm / 1000, 1];
@@ -295,9 +334,9 @@ function LabelProjector({ labels, els }: { labels: Label[]; els: RefObject<Map<s
   return null;
 }
 
-export default function Scene({ arm, stale, tray, session, highlighted, boxes = null }: {
+export default function Scene({ arm, stale, tray, session, highlighted, boxes = null, planned = null }: {
   arm: ArmState | null; stale: boolean; tray: TrayState | null; session: CalSession | null; highlighted: string | null;
-  boxes?: BoxesState | null;
+  boxes?: BoxesState | null; planned?: PlannedPath | null;
 }) {
   const fitMatrix = session?.active && session.fit?.matrix ? session.fit.matrix : null;
   const trayMatrix = tray ? tray.calibration?.matrix ?? defaultTrayMatrix(tray.outline) : null;
@@ -321,6 +360,9 @@ export default function Scene({ arm, stale, tray, session, highlighted, boxes = 
   }
   if (boxes) labels.push({ key: "packspot", text: "pack spot", cls: "point-label",
                            pos: robotToWorld([boxes.pack_spot_mm[0] / 1000, boxes.pack_spot_mm[1] / 1000, 0.01]) });
+  if (planned?.fail)
+    labels.push({ key: "fail", text: "fails here", cls: "fail-label",
+                  pos: robotToWorld([planned.fail[0], planned.fail[1], planned.fail[2] + 0.025]) });
   for (const pt of session?.points ?? [])
     labels.push({ key: `pt:${pt.pocket}`, text: pt.pocket, cls: "point-label",
                   pos: robotToWorld([pt.robot_m[0], pt.robot_m[1], pt.robot_m[2] + 0.014]) });
@@ -342,6 +384,7 @@ export default function Scene({ arm, stale, tray, session, highlighted, boxes = 
         )}
         {tray && fitMatrix && <FitOutline tray={tray} matrix={fitMatrix} />}
         {boxes && <PackSpot xy={boxes.pack_spot_mm} g={boxes.geometry} />}
+        {planned && <PlannedPathView path={planned} />}
         {boxes?.boxes.filter((b) => b.pose).map((b) => <BoxMesh key={b.id} box={b} g={boxes.geometry} />)}
         {session?.points.map((pt) => (
           <group key={pt.pocket} position={pt.robot_m}>

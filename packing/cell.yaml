@@ -52,9 +52,9 @@ tray:
 boxes:
   grip_from_wall_mm: 8     # tool point this far out from the box wall along the tab when calibrating (estimate:
                            # drawing / drops only — the grasp itself is exactly the calibrated one)
-  pack_spot_mm: [345, 0]   # box center (robot x, y) where an order is packed: middle of the sweep. The level tab
+  pack_spot_mm: [355, 0]   # box center (robot x, y) where an order is packed: middle of the sweep. The level tab
                            # grip reaches only with the grip point >= ~25 cm from the swivel -> box centers >= ~30 cm;
-                           # much further out, the drops over the box get unreachable (345 = grip point at 26 cm)
+                           # 355 works for grips 8–20 mm from the wall (345: deeper grips fail; 365+: drops fail)
   carry_mm: 30             # lift boxes straight up this far before moving them (no dragging, clears neighbours)
   min_center_mm: 305       # box centers at least this far from the swivel (closer: the level approach / back-out
                            # along the tab can't be reached). Add box refuses closer boxes

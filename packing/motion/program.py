@@ -124,9 +124,11 @@ class ProgramBuilder:
         (over, _, _, _), q, err, Ti = best
         where = f"{label} ({np.round(Ti[:3, 3] * 1000, 1)} mm)"
         if err > MAX_IK_ERR_M:
-            raise PathError(f"can't reach the {where}: IK off by {err * 1000:.1f} mm")
+            raise PathError(f"can't reach the {where}: IK off by {err * 1000:.1f} mm", Ti[:3, 3], list(self.steps),
+                            self.start)
         if over:
-            raise PathError(f"joint limit at the {where}: {({j: round(v, 1) for j, v in q.items() if abs(v) > JOINT_LIMIT})}")
+            raise PathError(f"joint limit at the {where}: {({j: round(v, 1) for j, v in q.items() if abs(v) > JOINT_LIMIT})}",
+                            Ti[:3, 3], list(self.steps), self.start)
         step = JointMove(q, speed, label)
         self.steps.append(step)
         self.pose = q
@@ -139,8 +141,8 @@ class ProgramBuilder:
         try:
             path = self.model.line(self.pose, np.asarray(p_m, float), limit=JOINT_LIMIT,
                                    orientation_weight=orientation_weight)
-        except PathError as e:
-            raise PathError(f"{label}: {e}") from e
+        except PathError as e:  # keep where it failed; the steps so far + the part of this line that worked
+            raise e.wrap(f"{label}: {e}", list(self.steps) + list(e.steps or []), self.start) from e
         step = LineMove(path, float(np.linalg.norm(np.asarray(p_m) - start_tip) * 1000), speed_mm_s, label)
         self.steps.append(step)
         self.pose = path[-1]
@@ -173,6 +175,36 @@ class ProgramBuilder:
         n, pose = mark
         del self.steps[n:]
         self.pose = pose
+
+
+# ---------- display ----------
+def tip_path(model: ArmModel, start: Pose, steps: list, samples: int = 12) -> list[dict]:
+    """The tool point's path through a program, for drawing: segments {kind: free|line|grip|release, label,
+    points: [[x, y, z], ...] (robot frame, m)}. Free moves are sampled along their joint interpolation."""
+    pose = {j: float(start[j]) for j in BODY}
+    out: list[dict] = []
+    tip = lambda q: [round(float(v), 4) for v in model.tip(q)]  # noqa: E731
+    for st in steps:
+        if isinstance(st, JointMove):
+            out.append({"kind": "free", "label": st.label, "points": [
+                tip({j: pose[j] + (st.pose[j] - pose[j]) * k / samples for j in BODY}) for k in range(samples + 1)]})
+            pose = {j: float(st.pose[j]) for j in BODY}
+        elif isinstance(st, LineMove) and st.path:
+            k = max(1, len(st.path) // 20)
+            out.append({"kind": "line", "label": st.label, "points": [tip(q) for q in st.path[::k]] + [tip(st.path[-1])]})
+            pose = {j: float(st.path[-1][j]) for j in BODY}
+        elif isinstance(st, Grip):
+            out.append({"kind": "grip", "label": st.label, "points": [tip(pose)]})
+        elif isinstance(st, OpenGripper):
+            out.append({"kind": "release", "label": st.label, "points": [tip(pose)]})
+    return out
+
+
+def path_payload(model: ArmModel, start: Pose, steps: list | None = None, error: PathError | None = None) -> dict:
+    """{"path": segments[, "fail_m": xyz]} for a planned program, or for how far a failed one got."""
+    if error is not None:
+        return {"path": tip_path(model, error.start or start, error.steps or []), "fail_m": error.point}
+    return {"path": tip_path(model, start, steps or [])}
 
 
 # ---------- run time ----------

@@ -462,6 +462,24 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     # ---------------- go-to preview (moves the arm; plan first, then confirm_move)
     goto_state: dict = {"runner": None}
 
+    def _path(h, joints, steps) -> dict:
+        """{"path": tool-point path segments} of a planned program (3D view)."""
+        from ..motion.program import path_payload
+
+        with h._lock:
+            return path_payload(h.model, {j: v for j, v in joints.items() if j != "gripper"}, steps)
+
+    def _plan_failed(message: str, h, joints, e) -> HTTPException:
+        """422 whose detail also says how far the plan got and where it failed (3D view)."""
+        from ..motion.program import path_payload
+
+        try:
+            with h._lock:
+                extra = path_payload(h.model, {j: v for j, v in joints.items() if j != "gripper"}, error=e)
+        except Exception:  # noqa: BLE001 — never hide the real error behind a drawing problem
+            extra = {"path": [], "fail_m": getattr(e, "point", None)}
+        return HTTPException(422, {"message": message, **extra})
+
     def _runner():
         if goto_state["runner"] is None:
             from .goto_runner import GotoRunner
@@ -506,8 +524,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             with h._lock:
                 plan = plan_goto(h.model, body.point, cal.to_robot(*xy), cal.normal, joints, standoff_mm=body.standoff_mm)
         except PathError as e:
-            raise HTTPException(422, f"can't plan that move: {e}") from e
+            raise _plan_failed(f"can't plan that move: {e}", h, joints, e) from e
         out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
+               **_path(h, joints, plan.steps),
                "started": False}
         if body.confirm_move:
             _runner().start(plan)
@@ -541,8 +560,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             with h._lock:
                 plan = plan_pocket_pick(h.model, tray, shelf.cfg.gripper, cal, body.pocket, joints)
         except PathError as e:
-            raise HTTPException(422, f"can't plan that pick: {e}") from e
+            raise _plan_failed(f"can't plan that pick: {e}", h, joints, e) from e
         out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
+               **_path(h, joints, plan.steps),
                "started": False}
         if body.confirm_move:
             _runner().start(plan)
@@ -703,11 +723,14 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         h = _hub()
         if not h.connected:
             raise HTTPException(409, "connect the arm first")
+        joints = h.state()["joints"]
         try:
             plan = TrayPacker(h, _box_cfg(), boxes, shelf).plan(o, dry_run=True)
-        except (PathError, ValueError, BoxError, RuntimeError) as e:
+        except PathError as e:
+            raise _plan_failed(f"can't pack order {order_id}: {e}", h, joints, e) from e
+        except (ValueError, BoxError, RuntimeError) as e:
             raise HTTPException(422, f"can't pack order {order_id}: {e}") from e
-        return {"plan": plan.summary() | {"steps": None}, "ok": True}
+        return {"plan": plan.summary() | {"steps": None}, "ok": True, **_path(h, joints, plan.steps)}
 
     @app.post("/api/arm/box-move")
     def arm_box_move(body: BoxMoveIn):
@@ -735,13 +758,14 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             with h._lock:
                 plan = plan_box_move(h.model, b, b.location, body.to, joints, cfg, _obstacles(pan, skip=b.id))
         except PathError as e:
-            raise HTTPException(422, f"can't plan that box move: {e}") from e
+            raise _plan_failed(f"can't plan that box move: {e}", h, joints, e) from e
 
         def moved(box_id=b.id, to=body.to):
             boxes.update(box_id, location=to)
             events.record("robot", f"Box {box_id} is now at {to}", box_id=box_id)
         plan.on_done = moved
-        out = {"plan": plan.summary(), "motors_will_turn_on": not h.torque, "started": False}
+        out = {"plan": plan.summary(), "motors_will_turn_on": not h.torque, "started": False,
+               **_path(h, joints, plan.steps)}
         if body.confirm_move:
             _runner().start(plan)
             out["started"] = True
