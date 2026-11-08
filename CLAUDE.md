@@ -74,7 +74,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   - `motion/` `controller.py` `Motion`: smooth joint moves, `follow()` for paths, settle + following-error
     checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line
     paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view) · `program.py` motion programs:
-    `joint_offsets.py` joint zero offsets fitted from desk touches · `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
+    `joint_offsets.py` joint zero offsets fitted from desk touches · `reach_comp.py` optional aim-higher-further-out · `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
     → validated steps → `run(steps, motion)`
   - `cell/` `inventory.py` SQLite parts inventory (tray pockets + event log; no boxes — those are in the orders DB)
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
@@ -209,7 +209,16 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   elbow, else lift alone; refused if std > 0.5°, |Δ| > 5° or no gain). Apply reloads the hub model and re-derives
   desk points/plane + boxes from their joints; the **tray must be re-calibrated**. Refused in `serve` without
   `--robot` (arm in another process). `GET/DELETE /api/desk`, `POST /api/desk/capture|save`,
-  `DELETE /api/desk/points[/{i}]`. Box moves open the jaws to `boxes.jaw_gap_mm` 24 mm on the approach/release.
+  `DELETE /api/desk/points[/{i}]`.
+- **Reach compensation** (optional, off by default; `motion/reach_comp.py`, Calibration tab → "Reach compensation";
+  plan `.claude/plans/reach_comp.md`): user's empirical extra sag correction after the joint fit "didn't do
+  anything" — aim higher the further out: lift = `lift_mm` · (r / (`at_reach` · max reach))^`power`, defaults
+  12.7 mm at 70 % (max reach ≈ 44 cm → 31 cm), power 2 (≈ 2 mm at 13 cm, 21 mm at 40 cm). Applied at **run
+  time only** (`raise_steps` in `goto_runner` and `TrayPacker`: every JointMove/LineMove pose re-solved with z
+  raised, same tool orientation; unreachable → refused before moving); plans, checks, dry-run paths and
+  hand-guided calibrations are unchanged. `cell.yaml` `reach_comp:` defaults; toggle + height saved in
+  `data/reach_comp.json` (sim `start`: `sim_reach_comp.json`). `GET/PUT /api/reach-comp {enabled?, lift_mm?}`.
+- Box moves open the jaws to `boxes.jaw_gap_mm` 24 mm on the approach/release.
 - **Planning tolerances** (user: a few mm of play is fine — prefer plans that work): `POSITION_TOL_M` 4 mm (IK
   reach for every planned point), `MAX_JOINT_STEP` 6 units per straight-line step (motion/kinematics.py).
 - **Planned-path view**: every dry run (pick, box move, go-to, order Check) returns `path` = tool-point segments
@@ -263,6 +272,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
 ## Conventions
+- **Git**: when the user asks to commit/push, commit and push straight to `main` — no feature branch needed (user, 2026-11-07).
 - Positions come from calibration (tray, boxes, desk), not taught poses; taught poses are only for `home` / demos.
 - SO-101 has 5 body DOF: IK targets must not fix tool yaw (it's tied to `shoulder_pan`). `ArmModel`
   splits R = Rz(azimuth) @ local and only holds/interpolates the local part — keep it that way.

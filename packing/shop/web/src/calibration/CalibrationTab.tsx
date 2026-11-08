@@ -7,6 +7,7 @@ import PathOverlay from "../arm/PathOverlay";
 import { usePlannedPath } from "../arm/plannedPath";
 import BoxesBox from "./BoxesBox";
 import DeskBox from "./DeskBox";
+import ReachCompBox from "./ReachCompBox";
 import type { ArmState, CalSession, DeskPlaneInfo, DeskState, Vec3 } from "../types";
 import Panel from "./Panel";
 import Scene from "./Scene";
@@ -79,6 +80,7 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
              run={run} busy={busy} error={error} clearError={() => setError(null)}>
         <BoxesBox arm={arm.data} boxes={boxes} apply={applyBoxes} />
         <DeskBox arm={arm.data} onChange={onDesk} />
+        <ReachCompBox />
       </Panel>
     </main>
   );

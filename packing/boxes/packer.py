@@ -76,6 +76,7 @@ class TrayPacker:
             had_box = self._box_of(order)
             try:
                 plan = self.plan(order, {j: v for j, v in arm.read().items() if j != "gripper"})
+                raised = self._reach_comp(plan.steps)  # aim higher further out, if turned on
             except Exception as e:  # nothing has moved: give the box back, the order can be actioned again
                 if had_box is None and (b := self._box_of(order)) is not None:
                     self.boxes.update(b.id, state="available", order_id=None)
@@ -86,7 +87,7 @@ class TrayPacker:
             motion = Motion(arm, PoseStore(self.cfg.poses_file), self.cfg.motion, self.cfg.gripper,
                             sleep=self.sleep, log=log.info, gravity=getattr(self.hub, "gravity", None))
             slow = self.cfg.motion.speed / 2
-            steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s for s in plan.steps]
+            steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s for s in raised]
             # step index -> what happens when that step STARTS (on_step runs before each step)
             index = {id(st): k for k, st in enumerate(steps)}
             starts = {r["start"]: i for i, r in enumerate(plan.item_steps)}
@@ -129,6 +130,17 @@ class TrayPacker:
         self.record("robot", f"Order {order.id} packed into box {plan.box_id} (now on the right)",
                     order_id=order.id, box_id=plan.box_id)
         return f"BOX-{plan.box_id}"
+
+    def _reach_comp(self, steps: list) -> list:
+        """Every commanded pose raised by the reach compensation (same list if it's off). ValueError if a raised
+        pose can't be reached — raised before anything moves."""
+        from ..motion.reach_comp import raise_steps
+
+        rc = self.cfg.reach_comp_settings() if hasattr(self.cfg, "reach_comp_settings") else None
+        if rc is None or not rc.enabled:
+            return steps
+        with self.hub._lock:
+            return raise_steps(self.hub.model, steps, rc)
 
     def _box_of(self, order: Order):
         return next((b for b in self.boxes.list() if b.order_id == order.id and b.state == "in_use"), None)

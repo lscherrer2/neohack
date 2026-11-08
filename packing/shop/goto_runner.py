@@ -98,6 +98,7 @@ class GotoRunner:
                 slow = self.cfg.motion.speed / 2
                 steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s
                          for s in plan.steps]
+                steps = self._reach_comp(steps)  # aim higher further out, if turned on (before anything moves)
                 run(steps, motion, on_step=lambda s: self.last.update(step=s.label))
             if getattr(plan, "on_done", None):  # e.g. record where a box now is
                 plan.on_done()
@@ -116,6 +117,18 @@ class GotoRunner:
             self.last.update(status="failed", error=str(e))
             self.record("error", f"{name} failed: {e}", point=target)
             log.exception("arm program failed")
+
+    def _reach_comp(self, steps: list) -> list:
+        from ..motion.reach_comp import raise_steps
+
+        rc = self.cfg.reach_comp_settings() if hasattr(self.cfg, "reach_comp_settings") else None
+        if rc is None or not rc.enabled or self.hub.model is None:
+            return steps
+        with self.hub._lock:
+            out = raise_steps(self.hub.model, steps, rc)
+        self.record("robot", f"Reach compensation on: aiming up to +{rc.lift_mm:.1f} mm at "
+                             f"{rc.at_reach:.0%} of max reach")
+        return out
 
     def _hold(self) -> None:
         try:

@@ -107,6 +107,11 @@ def build_mcp(tools: ShopTools, events: EventLog | None = None) -> MCPServer:
     return mcp
 
 
+class ReachCompIn(BaseModel):
+    enabled: bool | None = None
+    lift_mm: float | None = Field(default=None, ge=0, le=40)  # mm higher at reach_comp.at_reach of max reach
+
+
 class ChatIn(BaseModel):
     session_id: str = Field(min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=2000)
@@ -800,6 +805,36 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             cfg.desk_file.unlink()
             events.record("robot", "Desk calibration removed (box spots use the calibrated box height again)")
         return _desk_state()
+
+    # ---------------- reach compensation (packing/motion/reach_comp.py): aim higher further out
+    from ..motion import reach_comp as _rc
+
+    def _reach_state() -> dict:
+        cfg, h = _box_cfg(), _hub()
+        rc = cfg.reach_comp_settings()
+        out = rc.to_dict()
+        if h.model is not None:
+            with h._lock:
+                out |= {"max_reach_mm": round(_rc.max_reach_m(h.model) * 1000), "table": _rc.table(h.model, rc)}
+        return out
+
+    @app.get("/api/reach-comp")
+    def reach_comp_state():
+        return _reach_state()
+
+    @app.put("/api/reach-comp")
+    def reach_comp_set(body: ReachCompIn):
+        """Turn the reach compensation on/off or change its height (applies from the next move / order)."""
+        cfg = _box_cfg()
+        rc = cfg.reach_comp_settings()
+        if body.enabled is not None:
+            rc.enabled = body.enabled
+        if body.lift_mm is not None:
+            rc.lift_mm = round(body.lift_mm, 1)
+        _rc.save(cfg.reach_comp_file, rc)
+        events.record("robot", f"Reach compensation {'ON' if rc.enabled else 'off'}: +{rc.lift_mm:.1f} mm at "
+                               f"{rc.at_reach:.0%} of max reach")
+        return _reach_state()
 
     # ---------------- joint zero offsets from the desk touches (packing/motion/joint_offsets.py)
     def _touch_poses() -> tuple[list[dict], str]:

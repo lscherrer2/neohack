@@ -134,6 +134,14 @@ class CellConfig:
     boxes: BoxesCfg = field(default_factory=BoxesCfg)
     desk_file: Path | None = None  # desk plane calibration (packing/boxes/desk.py); sim runs use sim_desk_cal.json
     joint_offsets_file: Path | None = None  # kinematic zero offsets from the desk-touch fit (motion/joint_offsets.py)
+    reach_comp: object = None  # motion/reach_comp.ReachComp defaults (cell.yaml `reach_comp:`)
+    reach_comp_file: Path | None = None  # the Calibration-tab toggle / height (sim: sim_reach_comp.json)
+
+    def reach_comp_settings(self):
+        """Reach compensation as currently set (re-read every call: the dashboard may have just toggled it)."""
+        from .motion.reach_comp import ReachComp, load
+
+        return load(self.reach_comp_file, self.reach_comp or ReachComp())
 
     def arm_model(self):
         """ArmModel with this arm's calibration and saved joint offsets (re-read every call)."""
@@ -180,6 +188,11 @@ def load_config(path: str | Path) -> CellConfig:
     )
     cfg.joint_offsets_file = rel((raw.get("kinematics") or {}).get(
         "offsets_file", f"calibration/{cfg.robot_id}_joint_offsets.json"))
+    from .motion.reach_comp import ReachComp
+
+    rc = dict(raw.get("reach_comp") or {})
+    cfg.reach_comp_file = rel(rc.pop("file", "data/reach_comp.json"))
+    cfg.reach_comp = ReachComp(**rc)
     try:  # jaw degrees per gripper unit from the calibrated range (0..100 spans range_min..range_max)
         from .hardware.so101 import load_calibration
 

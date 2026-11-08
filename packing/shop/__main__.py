@@ -56,6 +56,8 @@ def make_hub(args, cfg):
         cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
     if cfg.desk_file:  # nor the real desk calibration
         cfg.desk_file = cfg.desk_file.with_name("sim_" + cfg.desk_file.name)
+    if cfg.reach_comp_file:  # nor the real reach-compensation toggle
+        cfg.reach_comp_file = cfg.reach_comp_file.with_name("sim_" + cfg.reach_comp_file.name)
     if cfg.joint_offsets_file:  # nor the real arm's joint offsets (those live in calibration/)
         cfg.joint_offsets_file = cfg.desk_file.with_name("sim_joint_offsets.json") if cfg.desk_file else None
     return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)
