@@ -111,7 +111,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   tray x for all but the breadboard (tray y). Catalog names come from the tray types;
   up to `max_items_per_order` (10) items per order, any mix. `cfg.stock_slots` = the tray pockets.
 - Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
-  points → averaged fit (tray face = least-squares plane through the touches, position = their centroid, in-plane turn = best 2D rotation; a corner a few mm off just nudges the average), warning above 3 mm RMS, refused only above 20 mm (wrong point touched). `tray.calibration_mode`: **corners** (default; the middle of each
+  points → averaged fit, **no roll** (tray mounts like a Patriot launcher: R = Rz(yaw) @ Rx(pitch), its left-right edge always level; yaw + pitch by least squares started from a plane + centroid fit, position = the touches' centroid; a corner a few mm off just nudges the average), warning above 3 mm RMS, refused only above 20 mm (wrong point touched). `tray.calibration_mode`: **corners** (default; the middle of each
   rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
   (`reference_points`: `aa_1`, `aa_7`, `breadboard_1`, `breadboard_5`). Any pocket/corner can be added as an extra
   point. CLI `tray-calibrate` or the dashboard Calibration tab (Corners/Pockets switch). Sim saves `sim_tray_cal.json`.
@@ -279,7 +279,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
 - **Rest pose between actions** (user, 2026-11-07): `cell.yaml` `rest_pose: sleep` (taught pose; built-in default in
-  `poses.DEFAULTS`; `null` = off; `cfg.rest()`). Box moves (`plan_box_move(rest=)`: straight up 50 mm from in front of
+  `poses.DEFAULTS`; `null` = off; `cfg.rest()`). Sleep = lift −30, elbow 65, wrist −97 (gripper straight up over the
+  base; the first sleep, elbow 97 / wrist −86, came in at ~45° toward the box wall — user: nearly hit the box). Box moves (`plan_box_move(rest=)`: straight up 50 mm from in front of
   the tab, then fold), pick tests (folds back holding the part) and every order step (after the box move in, after
   each part's drop, at the end after the box move out) end with a free joint move "back to sleep"
   (`boxes/move.rest_move`: arm checked clear of boxes / tray / desk along the interpolation, else the plan is

@@ -3,9 +3,12 @@
 The user hand-guides the gripper tip to a few reference points (tray coordinates known from the DXF)
 and we record the tip position (robot base frame, from FK). The fit gives rotation R and translation t:
 p_robot = R @ p_tray + t, with tray points in meters and z = 0 on the face. It averages rather than trusting
-any single touch: the tray face = least-squares plane through all touches, the tray's position = their
-centroid, and its in-plane turn = the best 2D rotation of the DXF points onto the touches (projected into
-that plane). So a corner touched a few mm off only nudges the average.
+any single touch, so a corner touched a few mm off only nudges the average.
+
+The tray mounts like a Patriot launcher (user, 2026-11-07): it can only turn about the vertical axis (yaw) and
+tilt about its own left-right edge (pitch) — never roll. So R = Rz(yaw) @ Rx(pitch): the tray's x axis (DXF
+left → right) is always level. Only those two angles are fitted (least squares, started from a free
+plane + centroid fit); the position = the touches' centroid matched to the DXF points' centroid.
 
 Tray normal = R[:, 2] (out of the face). Tray frame conventions: see `layout.py`.
 """
@@ -31,10 +34,34 @@ class CalibrationError(ValueError):
     """The reference points can't give a trustworthy tray pose."""
 
 
+def _fit_free(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Unconstrained rotation (centered point sets, src on z = 0): face normal = least-squares plane through the
+    touches, in-plane turn = 2D Procrustes. Only the starting guess for the no-roll fit."""
+    # plane normal = direction of least spread; sign from a full rigid fit, which knows the front face
+    n = np.linalg.svd(b)[2][2]
+    rough = Rotation.align_vectors(b, a)[0].as_matrix()
+    if n @ rough[:, 2] < 0:
+        n = -n
+    e1 = rough[:, 0] - (rough[:, 0] @ n) * n
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(n, e1)
+    p, q = np.column_stack([b @ e1, b @ e2]), a[:, :2]
+    theta = math.atan2(float(np.sum(q[:, 0] * p[:, 1] - q[:, 1] * p[:, 0])),
+                       float(np.sum(q[:, 0] * p[:, 0] + q[:, 1] * p[:, 1])))
+    x = math.cos(theta) * e1 + math.sin(theta) * e2
+    return np.column_stack([x, np.cross(n, x), n])
+
+
+def yaw_pitch_matrix(yaw: float, pitch: float) -> np.ndarray:
+    """R = Rz(yaw) @ Rx(pitch) (radians): the tray's x axis stays level (no roll)."""
+    return Rotation.from_euler("ZX", [yaw, pitch]).as_matrix()
+
+
 def fit_rigid(src: np.ndarray, dst: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Rotation R and translation t with dst ≈ R @ src + t (rows are points, n >= 3; src on the tray face,
-    z = 0). Plane + centroid fit: the face normal is the least-squares plane through dst, the centroids are
-    matched, and the in-plane rotation is a 2D Procrustes fit of src onto dst projected into that plane."""
+    z = 0), R = Rz(yaw) @ Rx(pitch) — no roll. Centroids matched; yaw + pitch by least squares."""
+    from scipy.optimize import least_squares
+
     src, dst = np.asarray(src, float), np.asarray(dst, float)
     if src.shape != dst.shape or src.shape[0] < MIN_POINTS:
         raise CalibrationError(f"need at least {MIN_POINTS} matching points")
@@ -43,23 +70,13 @@ def fit_rigid(src: np.ndarray, dst: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     sv = np.linalg.svd(a, compute_uv=False)
     if sv[1] < 1e-3 * max(sv[0], 1e-12):
         raise CalibrationError("reference points are (nearly) in a line; pick points spread over the tray")
-    # Plane through the touches: normal = direction of least spread. Sign from the full rigid fit, which
-    # knows the tray's handedness (which side is the front face).
-    _, _, vt = np.linalg.svd(b)
-    n = vt[2]
-    rough = Rotation.align_vectors(b, a)[0].as_matrix()
-    if n @ rough[:, 2] < 0:
-        n = -n
-    e1 = rough[:, 0] - (rough[:, 0] @ n) * n  # any in-plane basis (e1, e2, n) right-handed
-    e1 /= np.linalg.norm(e1)
-    e2 = np.cross(n, e1)
-    # Best in-plane rotation (2D Procrustes, no reflection) of the tray xy onto the projected touches.
-    p = np.column_stack([b @ e1, b @ e2])
-    q = a[:, :2]
-    theta = math.atan2(float(np.sum(q[:, 0] * p[:, 1] - q[:, 1] * p[:, 0])),
-                       float(np.sum(q[:, 0] * p[:, 0] + q[:, 1] * p[:, 1])))
-    x = math.cos(theta) * e1 + math.sin(theta) * e2
-    R = np.column_stack([x, np.cross(n, x), n])
+    R0 = _fit_free(a, b)
+    # start: yaw from the free fit's x axis, pitch from its normal seen in the (yaw-turned) frame
+    yaw0 = math.atan2(R0[1, 0], R0[0, 0])
+    M = yaw_pitch_matrix(-yaw0, 0.0) @ R0
+    pitch0 = math.atan2(M[2, 1], M[1, 1])
+    fit = least_squares(lambda v: (a @ yaw_pitch_matrix(*v).T - b).ravel(), [yaw0, pitch0])
+    R = yaw_pitch_matrix(*fit.x)
     return R, cd - R @ cs
 
 
@@ -176,8 +193,4 @@ def checks(cal: TrayCalibration, center_mm: tuple[float, float], pan_xy: np.ndar
         facing = math.degrees(math.acos(float(np.clip(horiz @ to_base / np.linalg.norm(horiz) / np.linalg.norm(to_base), -1, 1))))
         if facing > 15:
             warn.append(f"tray doesn't face the arm's swivel: off by {facing:.0f}°")
-    x_axis = cal.dir_to_robot(1, 0, 0)
-    roll = math.degrees(math.asin(float(np.clip(x_axis[2], -1, 1))))
-    if abs(roll) > 5:
-        warn.append(f"tray's left-right edge isn't level: {roll:+.0f}°")
     return warn

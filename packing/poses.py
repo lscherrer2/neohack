@@ -9,8 +9,10 @@ from .joints import BODY
 
 DEFAULTS = {
     "home": dict.fromkeys(BODY, 0.0),  # calibration mid-pose
-    # folded up, pointing at the middle: where the arm rests between actions (`rest_pose`); the taught values
-    "sleep": {"shoulder_pan": 0.66, "shoulder_lift": -31.1, "elbow_flex": 97.0, "wrist_flex": -86.06, "wrist_roll": 0.0},
+    # folded up over the base, gripper pointing straight up: where the arm rests between actions (`rest_pose`).
+    # Elbow straighter + wrist folded further than the first taught sleep (lift -31, elbow 97, wrist -86), whose
+    # free moves came in at ~45° toward the box wall (user: nearly hit the box); this comes in more from above
+    "sleep": {"shoulder_pan": 0.66, "shoulder_lift": -30.0, "elbow_flex": 65.0, "wrist_flex": -97.0, "wrist_roll": 0.0},
 }
 
 

@@ -11,8 +11,9 @@ it should still hold, but re-check with a go-to and redo it if a corner looks of
 table-touch joint-offset calibration (only if tip-on-table readings drift beyond ~±5 mm).
 
 As built (differs from the design below): DXF read with **ezdxf** (loops via `ezdxf.edgeminer`, polylines
-exploded), averaged fit (2026-11-07, exact corners were too hard to hit): normal = least-squares plane through the
-touches, position = centroid, in-plane turn = 2D Procrustes (sign/handedness from scipy `Rotation.align_vectors`);
+exploded), averaged fit (2026-11-07, exact corners were too hard to hit), **no roll** (user: the tray only turns about vertical
+and tilts, like a Patriot launcher): R = Rz(yaw) @ Rx(pitch), yaw + pitch by scipy `least_squares` started from a
+plane + centroid + 2D Procrustes fit; position = centroid; the "left-right edge isn't level" warning is gone;
 warning above 3 mm RMS, refused only above **20 mm RMS** (wrong / swapped point); config keys `size`/`spacing`/`grip_axis` per type, no
 `grip_width` yet; `calibration_mode: corners|pockets` (corners = middle of each R12 plate corner, ids
 `corner_bl/tl/br/tr`) + `reference_points` (pockets mode) in config; sim uses `sim_tray_cal.json`. Code: `packing/tray/`

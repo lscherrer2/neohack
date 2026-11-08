@@ -7,10 +7,10 @@
     "wrist_roll": 0.05
   },
   "sleep": {
-    "elbow_flex": 97.0,
-    "shoulder_lift": -31.1,
+    "elbow_flex": 65.0,
+    "shoulder_lift": -30.0,
     "shoulder_pan": 0.66,
-    "wrist_flex": -86.06,
+    "wrist_flex": -97.0,
     "wrist_roll": 0.0
   }
 }

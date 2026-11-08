@@ -131,6 +131,15 @@ class CalibrationTests(unittest.TestCase):
         center = np.mean([q for _, _, q in pts], axis=0)  # tray sits at the touches' centroid
         np.testing.assert_allclose(cal.to_robot(79.375, 52.07), center, atol=1e-6)
 
+    def test_no_roll_only_yaw_and_pitch(self):
+        R, t = tilted_pose(69)
+        rolled = R @ Rotation.from_euler("y", 6, degrees=True).as_matrix()  # touches imply a 6° roll: ignored
+        cal = calibrate(self.measure(rolled, t), max_rms_mm=20)
+        self.assertAlmostEqual(float(cal.dir_to_robot(1, 0, 0)[2]), 0.0, places=9)  # left-right edge level
+        self.assertAlmostEqual(tilt_deg(cal), tilt_deg(calibrate(self.measure(R, t))), delta=1.0)
+        cal = calibrate(self.measure(R, t, noise_mm=1.0))  # an un-rolled tray is recovered as before
+        np.testing.assert_allclose(cal.rot, R, atol=0.02)
+
     def test_rejects_bad_points(self):
         R, t = tilted_pose()
         pts = self.measure(R, t)
