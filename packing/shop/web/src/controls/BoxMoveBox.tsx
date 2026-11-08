@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { showFailed, showPlanned } from "../arm/plannedPath";
 import { api, errText } from "../api";
-import ConfirmDialog from "../calibration/ConfirmDialog";
 import type { ArmState, BoxesState, BoxInfo } from "../types";
 
 type Dest = BoxInfo["location"];
@@ -26,8 +25,7 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
   const dests = box ? ORDER.slice(ORDER.indexOf(box.location) + 1) : [];
   const [dest, setDest] = useState<Dest>("pack");
   const to = dests.includes(dest) ? dest : dests[0];
-  const [plan, setPlan] = useState<MoveReply | null>(null);
-  const [busy, setBusy] = useState<"plan" | "go" | "stop" | null>(null);
+  const [busy, setBusy] = useState<"go" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const moving = arm?.mode === "moving";
   const canPlan = !!arm?.connected && arm.mode === "idle" && !!box && !!to;
@@ -49,16 +47,6 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
     }
   }
 
-  const k = plan?.plan;
-  const body = k
-    ? `Box ${k.box_id}: open the jaws, come in level along its tab, grip, lift straight up ${k.carry_mm} mm, carry it ` +
-      `${DEST[k.to]} (largest joint change ${k.travel_units.toFixed(0)} units; the box tilts up to ` +
-      `${(k.max_carry_tilt_deg ?? 0).toFixed(0)}° on the way), lower it straight down to exactly the height it was ` +
-      `picked from (box ${k.land_tilt_deg.toFixed(1)}° off level), release and back out level along the tab. ` +
-      (plan!.motors_will_turn_on ? "The motors are released: they lock first and hold the arm where it is. " : "") +
-      "Keep the area clear; press Stop to halt."
-    : "";
-
   return (
     <section aria-labelledby="boxmove-h">
       <header>
@@ -79,28 +67,17 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
                       onClick={() => post("stop", "/api/arm/stop")}>{busy === "stop" ? "Stopping…" : "Stop"}</button>
             ) : (
               <button type="button" className="act" disabled={!canPlan || busy !== null}
-                      title={canPlan ? "Plan the move, then confirm" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
+                      title={canPlan ? "Plan and run the move (motors lock first if released)" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
                       onClick={async () => {
-                        const r = await post<MoveReply>("plan", "/api/arm/box-move", { box_id: box!.id, to },
+                        const r = await post<MoveReply>("go", "/api/arm/box-move", { box_id: box!.id, to, confirm_move: true },
                                                         `move box ${box!.id} ${DEST[to]}`);
-                        if (r) setPlan(r);
-                      }}>{busy === "plan" ? "Planning…" : "Move…"}</button>
+                        if (r) onMoved();
+                      }}>{busy === "go" ? "Starting…" : "Move"}</button>
             )}
           </div>
         )}
         {error && <p className="inline-err">{error}</p>}
       </div>
-      {plan && (
-        <ConfirmDialog title={`Move box ${plan.plan.box_id}?`} body={body}
-                       confirmLabel={plan.motors_will_turn_on ? "Lock motors and move" : "Move the box"}
-                       onCancel={() => setPlan(null)}
-                       onConfirm={async () => {
-                         const p = plan;
-                         setPlan(null);
-                         await post("go", "/api/arm/box-move", { box_id: p.plan.box_id, to: p.plan.to, confirm_move: true });
-                         onMoved();
-                       }} />
-      )}
     </section>
   );
 }

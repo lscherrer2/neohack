@@ -44,8 +44,8 @@ chat (Claude Haiku) ──MCP──▶ order server ◀──HTTP── robot ag
       (default): put the red-dot tip on the middle of each rounded plate corner, on the top edge, and press its
       Capture button (or switch to **Pocket centers**; any pocket/corner can be added as an extra point) → Save
       when the fit is OK (≤ 20 mm RMS; warning above 3 mm) → Finish (motors back on, holding).
-    - **Go to point (preview)**: pick a corner/pocket and a stand-off (default ½ in) → Go to… → read the plan in
-      the confirm dialog → the arm moves slowly to just off that point along the tray normal; **Stop** halts it.
+    - **Go to point (preview)**: pick a corner/pocket and a stand-off (default ½ in) → Go to (one click: plans,
+      then moves; an unplannable move is refused before moving) → the arm moves slowly to just off that point along the tray normal; **Stop** halts it.
       Uses the live fit while calibrating (motors turn on first), else the saved calibration.
     - The arm is owned by the server's `ArmHub` (`arm_hub.py`); go-to moves run in `goto_runner.py`.
 - Any MCP client can use the server, e.g. Claude Desktop / Claude Code (`http://localhost:8000/mcp`),

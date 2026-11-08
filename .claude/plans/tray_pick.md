@@ -67,8 +67,8 @@ a `fingertip` frame) and recalibrate the tray; then grasp_standoff = real tip cl
 ## Interfaces
 - `POST /api/arm/pick {pocket, confirm_move}` — dry run unless `confirm_move`; same runner/Stop/state
   (`GET /api/arm/goto`) as go-to. Does **not** change inventory (test; drop spot TBD).
-- Dashboard **Controls** tab → Procedures: pocket (grouped by type, full/empty shown) → **Pick…** → confirm dialog
-  with the plan → run; Stop; live step + result (grip width). Motors Locked/Released on the same tab.
+- Dashboard **Controls** tab → Procedures: pocket (grouped by type, full/empty shown) → **Pick** (one click: plan +
+  run; no confirm dialog since 2026-11-07); Stop; live step + result (grip width). Motors Locked/Released on the same tab.
 - Config (`cell.yaml` `tray:`): `grasp_standoff_mm`, `pull_mm`, `lift_mm`, `max_pitch_deg`, `pitch_step_deg`;
   per type `min_grip` (gripper units; breadboard 1 — tune).
 

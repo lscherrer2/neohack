@@ -118,7 +118,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
 - **Go-to preview** (`tray/goto.py` plan, `shop/goto_runner.py` run; dashboard "Go to point" box, `POST /api/arm/goto`):
   tip to `standoff_mm` (default 12.7 = ½ in) out along the tray normal from a corner/pocket, tool axis
   (gripper_frame +z) = inward normal projected into the arm's plane (5-DOF; leftover tilt reported). Free move to
-  60 mm out, then a straight line in. Always dry-run first (`confirm_move: false`) → UI confirm dialog → move;
+  60 mm out, then a straight line in. The UI's Go to = one click: `confirm_move: true` (the server plans + checks
+  first and refuses an unplannable move before moving; `confirm_move: false` = dry run via the API);
   `POST /api/arm/stop` halts. Uses the live fit while calibrating if good, else the saved calibration. Turns the
   motors on (holding) if they were off; `POST /api/arm/release` turns them off again for more hand-guided capture.
 - 5-DOF limit (accepted by the user): off-center pockets are gripped tilted (no wrist yaw); `tray` / the fit
@@ -187,7 +188,10 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   swivel, level (parts longer than the 76 mm opening, e.g. glue: pitched just enough to fit, ~65°, end first); part
   center (tool point + length/2, beside the fixed jaw) over the box center; jaws + whole part ≥ `RIM_CLEAR_MM` above
   the rim; way in / release / retreat checked clear of the box. From 380 mm out glue only fits level (would bridge the rim).
-  **One-way boxes**: supply → pack → output only (box-move `to` = pack|output; no reset); new boxes only via "Add box";
+  **One-way boxes**: supply → pack → output only (box-move `to` = pack|output); new boxes only via "Add box";
+  for testing, **Reset** (Calibration → Packing boxes; `POST /api/boxes/{id}/reset`, `BoxStore.reset`)
+  = the human put the box back on its starting spot → record back to empty at its calibrated supply pose (refused while
+  its order is `packing`; the robot does NOT move it);
   a packed box at output = obstacle until **Picked up** (Calibration → Packing boxes; `DELETE /api/boxes/{id}`). An
   `in_use` box can be removed unless its order is `packing`. Demo quality: no resume/retries. Each part is marked
   used as soon as it's out of its pocket (live tray map; event "item i/n: sku from pocket → box"). Gripper closes on
@@ -253,7 +257,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via
   SSE `/api/events/stream`, in-memory `events.EventLog`, last 500), **Controls** (`web/src/controls/`: live 3D arm +
   tray, arm connect + joint values, **Motors** Locked/Released via `POST /api/arm/torque {on, confirm_hold}` — idle
-  only, release needs the hold confirmation — and **Procedures**: pick from a pocket, dry run → confirm → run, Stop,
+  only — and **Procedures**: pick from a pocket (one click plans + runs), Stop,
   live step/result from `GET /api/arm/goto`) and **Calibration** (calibration only: 3D view, compact arm status,
   Corners/Pockets switch, capture buttons + extra point, live fit, Save/Finish, "Check: go to point" with Stop).
   Both 3D tabs share `web/src/arm/useArmLive.ts`. The old "Preview pose" toggle is gone from the UI
@@ -275,6 +279,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
 ## Conventions
+- **No confirmation dialogs in the dashboard** (user, 2026-11-07): every button acts on one click — moves (go-to, pick, box move: plan + run), motors off (the arm drops: hold it first), deletes/removes, Empty all. The API still requires `confirm_move` / `confirm_hold`; the UI just sends them. Don't add confirm dialogs back.
 - **Git**: when the user asks to commit/push, commit and push straight to `main` — no feature branch needed (user, 2026-11-07).
 - Positions come from calibration (tray, boxes, desk), not taught poses; taught poses are only for `home` / demos.
 - SO-101 has 5 body DOF: IK targets must not fix tool yaw (it's tied to `shoulder_pan`). `ArmModel`

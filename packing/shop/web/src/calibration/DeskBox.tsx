@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import { api, errText, usePoll } from "../api";
 import type { ArmState, DeskState, OffsetFit } from "../types";
-import ConfirmDialog from "./ConfirmDialog";
 
 /**
  * Desk plane: motors off, touch the closed jaw tip to the desk at 3+ spots far apart (left, middle, right) → Save.
@@ -11,10 +10,8 @@ export default function DeskBox({ arm, onChange }: { arm: ArmState | null; onCha
   const [desk, setDesk] = useState<DeskState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
   const [offsetFit, setOffsetFit] = useState<OffsetFit | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
-  const [confirmOffsets, setConfirmOffsets] = useState<"apply" | "remove" | null>(null);
   const apply = useCallback((d: DeskState) => { setDesk(d); onChange(d); }, [onChange]);
   const reload = useCallback(async () => {
     try { apply(await api<DeskState>("GET", "/api/desk")); } catch { /* older server */ }
@@ -67,7 +64,7 @@ export default function DeskBox({ arm, onChange }: { arm: ArmState | null; onCha
                     onClick={() => act("clear", "DELETE", "/api/desk/points")}>Clear points</button>
           )}
           {s && (
-            <button type="button" className="del" disabled={busy !== null} onClick={() => setConfirmRemove(true)}>
+            <button type="button" className="del" disabled={busy !== null} onClick={() => act("rm", "DELETE", "/api/desk")}>
               Remove calibration</button>
           )}
         </div>
@@ -107,11 +104,11 @@ export default function DeskBox({ arm, onChange }: { arm: ArmState | null; onCha
                   onClick={() => act("ofit", "POST", "/api/joint-offsets/fit")}>
             {busy === "ofit" ? "Fitting…" : "Fit joint angles"}</button>
           {offsetFit?.ok && (
-            <button type="button" className="act" disabled={busy !== null} onClick={() => setConfirmOffsets("apply")}>
+            <button type="button" className="act" disabled={busy !== null} title="Desk + boxes are re-derived; re-calibrate the tray afterwards" onClick={() => act("oapply", "POST", "/api/joint-offsets/apply")}>
               Apply correction</button>
           )}
           {Object.keys(offsets).length > 0 && (
-            <button type="button" className="del" disabled={busy !== null} onClick={() => setConfirmOffsets("remove")}>
+            <button type="button" className="del" disabled={busy !== null} onClick={() => act("orm", "DELETE", "/api/joint-offsets")}>
               Remove corrections</button>
           )}
         </div>
@@ -141,28 +138,6 @@ export default function DeskBox({ arm, onChange }: { arm: ArmState | null; onCha
         )}
         {notes.map((n) => <p key={n} className="sub"><strong>Note:</strong> {n}</p>)}
       </div>
-      {confirmOffsets && (
-        <ConfirmDialog
-          title={confirmOffsets === "apply" ? "Apply the joint angle correction?" : "Remove the joint angle corrections?"}
-          body={(confirmOffsets === "apply"
-            ? "Every IK target and 3D position shifts slightly (taught poses in servo units don't change). "
-            : "Back to the plain calibration zero. ")
-            + "Desk points, the saved desk plane and the boxes are re-derived from their stored joints automatically; "
-            + "the tray calibration must be redone. Nothing moves."}
-          confirmLabel={confirmOffsets === "apply" ? "Apply" : "Remove"}
-          onCancel={() => setConfirmOffsets(null)}
-          onConfirm={() => {
-            const which = confirmOffsets;
-            setConfirmOffsets(null);
-            act(which === "apply" ? "oapply" : "orm", which === "apply" ? "POST" : "DELETE",
-                which === "apply" ? "/api/joint-offsets/apply" : "/api/joint-offsets");
-          }} />
-      )}
-      {confirmRemove && (
-        <ConfirmDialog title="Remove the desk calibration?" body="Box spots go back to assuming a flat desk at the calibrated box's height."
-                       confirmLabel="Remove" onCancel={() => setConfirmRemove(false)}
-                       onConfirm={() => { setConfirmRemove(false); act("rm", "DELETE", "/api/desk"); }} />
-      )}
     </section>
   );
 }

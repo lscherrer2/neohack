@@ -15,7 +15,8 @@ The system is a stack: each layer only works if the ones under it do. Status per
 - ✅ SO-101 follower (Hiwonder kit, STS3215 servos IDs 1–6), driven directly over the Feetech SDK (no LeRobot).
 - ✅ Base sits directly on the table (table = z 0). Parts tray clamped, tilted ~69° from flat, faces the arm.
 - ✅ Wrist camera available through `camera/cam_server.py` (user runs it; Claude reads frames over HTTP).
-- 🟡 Safety is software-only: confirm dialogs (`confirm_hold`, `confirm_move`), slow moves, following-error stop,
+- 🟡 Safety is software-only: the API's `confirm_hold` / `confirm_move` (the UI has no confirm dialogs since
+  2026-11-07 — one click acts), slow moves, following-error stop,
   Stop button. No physical e-stop.
 - ⚠️ **There is a monitor near the arm.** It was hit during a wide pose sweep (2026-11-07). The height-only
   clearance check doesn't know about it. Keep test motions in regions already used safely unless the user OKs a

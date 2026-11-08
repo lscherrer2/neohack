@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, errText } from "../api";
 import type { ArmState, BoxesState, BoxInfo } from "../types";
-import ConfirmDialog from "./ConfirmDialog";
 
 const WHERE: Record<BoxInfo["location"], string> = { supply: "left (supply)", pack: "pack spot", output: "right (done)" };
 const STATE: Record<BoxInfo["state"], string> = { available: "empty", in_use: "in use", packed: "packed" };
@@ -15,7 +14,6 @@ export default function BoxesBox({ arm, boxes, apply }: {
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
   const canCapture = !!arm?.connected && arm.torque === false;
 
   async function act(name: string, method: string, url: string) {
@@ -70,13 +68,18 @@ export default function BoxesBox({ arm, boxes, apply }: {
                     {b.desk_mm?.pack != null && b.desk_mm.output != null &&
                       ` · desk: pack spot ${signed(b.desk_mm.pack)}, output ${signed(b.desk_mm.output)} mm`}</td>
                   <td className="btns">
+                    {(b.state !== "available" || b.location !== "supply") && (
+                      <button className="act" disabled={busy !== null}
+                              title="Testing: put the box back on its starting spot by hand, then reset it (no re-calibration)"
+                              onClick={() => act(`reset:${b.id}`, "POST", `/api/boxes/${b.id}/reset`)}>{busy === `reset:${b.id}` ? "Resetting…" : "Reset"}</button>
+                    )}
                     {b.state === "packed" ? (
                       <button className="act" disabled={busy !== null} title="The customer took it: forget this box"
                               onClick={() => act(`del:${b.id}`, "DELETE", `/api/boxes/${b.id}`)}>Picked up</button>
                     ) : (
                       <button className="del" disabled={busy !== null}
                               title={b.state === "in_use" ? "Only if its order isn't being packed" : undefined}
-                              onClick={() => setConfirmRemove(b.id)}>Remove</button>
+                              onClick={() => act(`del:${b.id}`, "DELETE", `/api/boxes/${b.id}`)}>Remove</button>
                     )}
                   </td>
                 </tr>
@@ -85,11 +88,6 @@ export default function BoxesBox({ arm, boxes, apply }: {
           </table>
         )}
       </div>
-      {confirmRemove != null && (
-        <ConfirmDialog title={`Remove box ${confirmRemove}?`} body="Its calibration is deleted. Add it again to use it."
-                       confirmLabel="Remove" onCancel={() => setConfirmRemove(null)}
-                       onConfirm={() => { const id = confirmRemove; setConfirmRemove(null); act(`del:${id}`, "DELETE", `/api/boxes/${id}`); }} />
-      )}
     </section>
   );
 }

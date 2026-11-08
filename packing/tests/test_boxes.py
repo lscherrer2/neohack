@@ -148,6 +148,12 @@ class StoreTests(unittest.TestCase):
         orders.claim_next("queued")  # order o7 is being packed
         with self.assertRaises(BoxError):
             s.remove(b1.id)  # in use by an order being packed
+        with self.assertRaises(BoxError):
+            s.reset(b1.id)  # same: its order is being packed
+        s.update(b1.id, location="output", state="packed")
+        r = s.reset(b1.id)  # put back by hand for another test run
+        self.assertEqual((r.state, r.location, r.order_id), ("available", "supply", None))
+        np.testing.assert_allclose(r.supply, b1.supply)  # same calibrated spot
         s.update(b1.id, location="output", state="packed")
         s.remove(b1.id)
         self.assertEqual([b.id for b in s.list()], [b2.id])
@@ -304,6 +310,12 @@ class ApiTests(unittest.TestCase):
         b2 = self.http.get("/api/boxes").json()["boxes"][0]
         self.assertEqual(b2["location"], "pack")
         np.testing.assert_allclose(np.array(b2["pose"])[:2, 3], [0.355, 0.0], atol=1e-6)
+        r = self.http.post(f"/api/boxes/{b['id']}/reset")  # put back by hand: at its supply spot again
+        self.assertEqual(r.status_code, 200)
+        b3 = r.json()["boxes"][0]
+        self.assertEqual((b3["location"], b3["state"]), ("supply", "available"))
+        np.testing.assert_allclose(b3["pose"], b["pose"], atol=1e-9)
+        self.assertEqual(self.http.post("/api/boxes/999/reset").status_code, 404)
         self.assertEqual(self.http.delete(f"/api/boxes/{b['id']}").status_code, 200)
         self.assertEqual(self.http.get("/api/boxes").json()["boxes"], [])
 

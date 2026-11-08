@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react";
 import type { ArmState, CalSession, TrayState } from "../types";
 import type { Avail } from "./CalibrationTab";
-import ConfirmDialog from "./ConfirmDialog";
 import GotoBox from "./GotoBox";
 
 interface Props {
@@ -104,7 +103,6 @@ export function ArmStatus({ arm, stale, run, busy, compact = false }: Pick<Props
 
 export default function Panel(p: Props) {
   const { cal, tray, run, busy, error } = p;
-  const [confirm, setConfirm] = useState<null | "start" | "finish">(null);
   const [extra, setExtra] = useState("");
   const s = cal.data;
   const names = Object.fromEntries((tray?.types ?? []).map((t) => [t.sku, t.name]));
@@ -149,7 +147,8 @@ export default function Panel(p: Props) {
                   Touch each reference point with the gripper tip while the motors are off. The arm goes limp: hold it first.
                 </p>
                 <div className="cal-actions single">
-                  <button className="big" disabled={busy !== null} onClick={() => setConfirm("start")}>Start calibration</button>
+                  <button className="big" disabled={busy !== null} title="Motors turn OFF and the arm drops — hold it first"
+                          onClick={() => run("start", "POST", "/api/calibration/start", { confirm_hold: true })}>Start calibration</button>
                 </div>
               </>
             ) : (
@@ -236,7 +235,8 @@ export default function Panel(p: Props) {
                         onClick={() => run("save", "POST", "/api/calibration/save")}>
                   {busy === "save" ? "Saving…" : "Save calibration"}
                 </button>
-                <button className="big warn" disabled={busy !== null} onClick={() => setConfirm("finish")}>Finish</button>
+                <button className="big warn" disabled={busy !== null} title="Motors turn back ON and hold the current pose — hold the arm"
+                        onClick={() => { p.setTarget(null); setExtra(""); run("finish", "POST", "/api/calibration/finish", { confirm_hold: true }); }}>Finish</button>
               </div>
             )}
           </div>
@@ -245,21 +245,6 @@ export default function Panel(p: Props) {
 
       {p.children}
 
-      {confirm === "start" && (
-        <ConfirmDialog title="Start calibration?" body="Hold the arm — motors will turn OFF and it will drop."
-                       confirmLabel="I'm holding it, turn motors off"
-                       onCancel={() => setConfirm(null)}
-                       onConfirm={() => { setConfirm(null); run("start", "POST", "/api/calibration/start", { confirm_hold: true }); }} />
-      )}
-      {confirm === "finish" && (
-        <ConfirmDialog title="Finish calibration?" body="Hold the arm — motors turn back ON and it will hold its current pose."
-                       confirmLabel="I'm holding it, turn motors on"
-                       onCancel={() => setConfirm(null)}
-                       onConfirm={() => {
-                         setConfirm(null); p.setTarget(null); setExtra("");
-                         run("finish", "POST", "/api/calibration/finish", { confirm_hold: true });
-                       }} />
-      )}
     </div>
   );
 }

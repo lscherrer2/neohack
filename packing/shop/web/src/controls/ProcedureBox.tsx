@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { showFailed, showPlanned } from "../arm/plannedPath";
 import { api, errText, usePoll } from "../api";
-import ConfirmDialog from "../calibration/ConfirmDialog";
 import type { ArmState, TrayState } from "../types";
 
 /** Server reply of POST /api/arm/pick (packing/tray/pick.py summary). */
@@ -25,7 +24,8 @@ interface JobState {
 }
 
 /**
- * Procedures: pick a part from a pocket. Plan (dry run) -> confirm dialog with the plan -> run; Stop while running.
+ * Procedures: pick a part from a pocket. One click plans and runs it (the server refuses an unplannable pick
+ * before moving); Stop while running.
  * The pick: open to the part width + margin, approach along the tray normal, grip, pull straight out, lift, hold.
  */
 export default function ProcedureBox({ arm, tray, setHighlighted }: {
@@ -39,8 +39,7 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
   }, [pockets, pocket]);
   useEffect(() => { setHighlighted(pocket || null); }, [pocket, setHighlighted]);
 
-  const [plan, setPlan] = useState<PickReply | null>(null);
-  const [busy, setBusy] = useState<"plan" | "go" | "stop" | null>(null);
+  const [busy, setBusy] = useState<"go" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<JobState | null>(null);
   const refreshJob = useCallback(async () => {
@@ -74,20 +73,6 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
     }
   }
 
-  const k = plan?.plan;
-  const body = k
-    ? `Pick the ${name(k.sku)} from ${k.pocket}: open the gripper to ${k.open_value ?? "fully open"} ` +
-      `(part ${k.grip_mm} mm + margin), free move (largest joint change ${k.travel_units.toFixed(0)} units) to the ` +
-      `approach point, slowly straight in to ${k.grasp_standoff_mm.toFixed(1)} mm off the tray face beside the part ` +
-      `(fixed jaw ${(k.side_offset_mm ?? 0).toFixed(1)} mm to the side), grip, pull straight out ${k.pull_mm.toFixed(0)} mm ` +
-      `along the normal, lift ${k.lift_mm.toFixed(0)} mm and hold it there. ` +
-      `Tool pitched ${k.pitch_deg.toFixed(0)}° down (${k.tilt_deg.toFixed(0)}° off the normal); it turns ` +
-      `${k.pull_twist_deg.toFixed(0)}° during the pull; jaws ${k.jaw_off_deg.toFixed(0)}° off the grip direction. ` +
-      `A missed grip opens and backs out. Uses the ${plan!.calibration}. Inventory is not changed.` +
-      (plan!.motors_will_turn_on ? " The motors are released: they lock first and hold the arm where it is." : "") +
-      " Keep the area clear; press Stop to halt."
-    : "";
-
   const last = job?.last;
   const lastName = last?.plan.pocket ? pretty(last.plan.pocket) : last?.plan.point ?? "";
 
@@ -115,12 +100,9 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
                       onClick={() => act("stop", "/api/arm/stop")}>{busy === "stop" ? "Stopping…" : "Stop"}</button>
             ) : (
               <button type="button" className="act" disabled={!canPlan || !pocket || busy !== null}
-                      title={canPlan ? "Plan the pick, then confirm" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
-                      onClick={async () => {
-                        const r = await act<PickReply>("plan", "/api/arm/pick", { pocket }, `pick ${pretty(pocket)}`);
-                        if (r) setPlan(r);
-                      }}>
-                {busy === "plan" ? "Planning…" : "Pick…"}
+                      title={canPlan ? "Plan and run the pick (motors lock first if released)" : !arm?.connected ? "Connect the arm first" : `The arm is ${arm?.mode}`}
+                      onClick={() => act<PickReply>("go", "/api/arm/pick", { pocket, confirm_move: true }, `pick ${pretty(pocket)}`)}>
+                {busy === "go" ? "Starting…" : "Pick"}
               </button>
             )}
           </div>
@@ -138,16 +120,6 @@ export default function ProcedureBox({ arm, tray, setHighlighted }: {
         )}
         {error && <p className="inline-err">{error}</p>}
       </div>
-      {plan && (
-        <ConfirmDialog title={`Pick ${pretty(plan.plan.pocket)}?`} body={body}
-                       confirmLabel={plan.motors_will_turn_on ? "Lock motors and pick" : "Pick"}
-                       onCancel={() => setPlan(null)}
-                       onConfirm={async () => {
-                         const p = plan;
-                         setPlan(null);
-                         await act<PickReply>("go", "/api/arm/pick", { pocket: p.plan.pocket, confirm_move: true });
-                       }} />
-      )}
     </section>
   );
 }

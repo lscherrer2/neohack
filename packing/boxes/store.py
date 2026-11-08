@@ -3,7 +3,8 @@
 A box is `available` (calibrated, empty, at its supply spot on the left), `in_use` (taken by an order; at the
 pack spot in the middle while it's filled) or `packed` (done: at its output spot = the supply spot mirrored to
 the right). `location` says where it physically is: supply | pack | output. Boxes only move left → right; a packed
-box is deleted when it's picked up, new boxes come in only through Calibration → "Add box".
+box is deleted when it's picked up, new boxes come in only through Calibration → "Add box". For testing, `reset`
+puts a box record back to empty at its calibrated supply spot (after a human put the box back there).
 """
 
 from __future__ import annotations
@@ -97,6 +98,16 @@ class BoxStore:
         with self.lock:
             self.db.execute("DELETE FROM boxes WHERE id=?", (box_id,))
         return b
+
+    def reset(self, box_id: int) -> Box:
+        """Back to the start (testing): empty, at its calibrated supply spot, no order — a human has put the box
+        back where it was when it was added, so no re-calibration is needed. Not while its order is being packed."""
+        b = self.get(box_id)
+        if b.state == "in_use":
+            r = self.db.execute("SELECT status FROM orders WHERE id=?", (b.order_id,)).fetchone()
+            if r and r["status"] == "packing":
+                raise BoxError(f"box {box_id} is in use by order {b.order_id}, which is being packed")
+        return self.update(box_id, location="supply", state="available", order_id=None)
 
     def peek(self, order_id: int) -> Box:
         """The box `take` would give this order, without assigning it (dry runs)."""

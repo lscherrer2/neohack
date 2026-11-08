@@ -156,7 +156,7 @@ export default function TrayMap({ trayLoad }: { trayLoad: TrayLoad }) {
             <td className="btns">
               <button className="act" disabled={busySku !== null || total === shown.length} onClick={() => fill(true)}>Fill all</button>
               <button className="del" disabled={busySku !== null || total === 0}
-                      onClick={() => { if (confirm("Mark every tray pocket empty?")) fill(false); }}>Empty all</button>
+                      onClick={() => fill(false)}>Empty all</button>
             </td>
           </tr>
         </tbody>

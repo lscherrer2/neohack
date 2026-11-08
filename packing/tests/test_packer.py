@@ -156,8 +156,11 @@ class BoxFlowApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 409)
         self.assertIn("still at the pack spot", r.json()["detail"])
 
-    def test_reset_is_gone_and_picked_up_deletes(self):
-        self.assertIn(self.http.post(f"/api/boxes/{self.box.id}/reset").status_code, (404, 405))
+    def test_reset_for_testing_and_picked_up_deletes(self):
+        self.boxes.update(self.box.id, location="output", state="packed")
+        r = self.http.post(f"/api/boxes/{self.box.id}/reset")  # back by hand for another test run (2026-11-07)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.json()["boxes"][0]["state"], r.json()["boxes"][0]["location"]), ("available", "supply"))
         self.boxes.update(self.box.id, location="output", state="packed")
         r = self.http.delete(f"/api/boxes/{self.box.id}")
         self.assertEqual(r.status_code, 200)

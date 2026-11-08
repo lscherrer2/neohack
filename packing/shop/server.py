@@ -25,6 +25,7 @@
   GET  /api/boxes               calibrated packing boxes (+ pose at their location, pack spot, geometry)
   POST /api/boxes/capture       motors off, gripper level along a box tab, jaws closed on it: add that box
   DELETE /api/boxes/{id}        remove a box record (a packed box at output: "Picked up")
+  POST /api/boxes/{id}/reset    testing: box put back by hand -> empty at its calibrated supply spot again
   POST /api/arm/box-move        {"box_id", "to": pack|output, "confirm_move"} move a box by its tab (forward only)
   POST /api/orders/{id}/pack-plan  dry run of packing that order (box in, picks + drops, box out); nothing moves
   GET  /api/desk                desk plane: touched points, live fit, saved plane
@@ -723,6 +724,15 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409 if "in use" in str(e) else 404, str(e)) from e
         events.record("robot", f"Box {box_id} picked up" + (f" (order {b.order_id})" if b.order_id else "")
                       if b.state == "packed" else f"Box {box_id} removed", box_id=box_id)
+        return _boxes_state()
+
+    @app.post("/api/boxes/{box_id}/reset")
+    def boxes_reset(box_id: int):
+        try:
+            b = boxes.reset(box_id)
+        except BoxError as e:
+            raise HTTPException(409 if "in use" in str(e) else 404, str(e)) from e
+        events.record("robot", f"Box {box_id} reset to its starting spot (put back by hand)", box_id=b.id)
         return _boxes_state()
 
     # ---------------- desk plane (packing/boxes/desk.py): box spot heights follow the real desk
