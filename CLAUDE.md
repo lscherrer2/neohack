@@ -285,6 +285,11 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   each part's drop, at the end after the box move out) end with a free joint move "back to sleep"
   (`boxes/move.rest_move`: arm checked clear of boxes / tray / desk along the interpolation, else the plan is
   refused). Go-to checks stay at the point. Order `item_steps[i]["end"]` = that item's "back to sleep" step.
+  **Orders work out of sleep** (user, 2026-11-07: sleep is safe, rotate there, then come out): the plan starts with a
+  plain "to sleep first" move from wherever the arm is; every free move out of sleep is split by
+  `boxes/move.swivel_first` into "turn at sleep" (only pan + wrist roll) then the reach in the arm's plane; each part
+  is carried pick → back to sleep → turn → over the box (no direct tray→box swing); the box move in ends like the
+  move out (back out, straight up 50 mm, sleep) instead of `retreat_up`.
 
 ## Conventions
 - **No confirmation dialogs in the dashboard** (user, 2026-11-07): every button acts on one click — moves (go-to, pick, box move: plan + run), motors off (the arm drops: hold it first), deletes/removes, Empty all. The API still requires `confirm_move` / `confirm_hold`; the UI just sends them. Don't add confirm dialogs back.

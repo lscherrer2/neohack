@@ -18,7 +18,7 @@ from packing.boxes.store import BoxStore
 from packing.config import load_config
 from packing.hardware.arm import FakeArm
 from packing.motion.kinematics import POSITION_TOL_M
-from packing.motion.program import Grip, OpenGripper
+from packing.motion.program import Grip, JointMove, OpenGripper
 from packing.service.orders import Order, OrderStore
 from packing.service.vapi import Catalog
 from packing.shop.arm_hub import ArmHub
@@ -78,8 +78,24 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([st.label for st in plan.steps[-3:]],
                          ["back out level along the tab", "straight up 50 mm", "back to sleep"])
         self.assertEqual(plan.steps[-1].pose, self.cfg.rest())
-        up = next(i for i, st in enumerate(plan.steps) if st.label == "up and away from the box")
-        self.assertEqual(plan.steps[up + 1].label, "back to sleep")  # after the box move in, before the first pick
+        # starts by folding to sleep; every free move out of sleep only turns the base (+ wrist roll) first, then
+        # reaches out in the arm's plane; parts are carried tray -> sleep -> box
+        rest = self.cfg.rest()
+        moves = [st for st in plan.steps if isinstance(st, JointMove)]
+        self.assertEqual(moves[0].label, "to sleep first")
+        self.assertEqual(moves[0].pose, rest)
+        planar = ("shoulder_lift", "elbow_flex", "wrist_flex")
+        for a, b in zip(moves, moves[1:]):
+            if a.pose == rest:
+                with self.subTest(after=a.label, move=b.label):
+                    self.assertEqual(b.label, "turn at sleep")
+                    self.assertEqual([b.pose[j] for j in planar], [rest[j] for j in planar])
+            if a.label == "turn at sleep":
+                self.assertEqual(b.pose["shoulder_pan"], a.pose["shoulder_pan"])
+        sleeps = [i for i, st in enumerate(plan.steps) if st.label == "back to sleep"]
+        for i in plan.item_steps:  # holding the part: back to sleep between the pick and the drop
+            self.assertTrue(any(i["taken"] <= k < i["end"] for k in sleeps))
+        self.assertNotIn("up and away from the box", [st.label for st in plan.steps])  # box in: straight up instead
 
     def assert_side_releases(self, plan, drops, skus):
         """Every release: jaws closing horizontally, the part's center over the opening, jaws + part above the rim."""

@@ -21,11 +21,12 @@ from typing import Callable
 
 import numpy as np
 
+from ..joints import BODY
 from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
-from ..motion.program import OpenGripper, ProgramBuilder, Step, describe
+from ..motion.program import JointMove, OpenGripper, ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets, pitched, plan_pocket_pick
 from .geometry import BOX_H, BOX_W, WALL
-from .move import box_pose, down_seeds, plan_box_move, rest_move
+from .move import box_pose, down_seeds, plan_box_move, rest_move, swivel_first
 
 RIM_CLEAR_MM = 12.0  # jaws (tool point) and the part's underside at least this far above the rim at the release
 DROP_PITCHES_DEG = (0.0, 10.0, 20.0, 30.0, 45.0, 60.0)  # release tool pitch below level, tried in order
@@ -316,13 +317,19 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
             steps.extend(back)
             pose = dict(back[-1].pose)
 
+    # start from the rest pose: wherever the arm was left (hand-guided, a go-to check), fold to sleep first —
+    # a plain move, not refused (user: get to the safe pose, then work from there)
+    if rest is not None and max(abs(float(rest[j]) - pose[j]) for j in BODY) > 0.5:
+        steps.append(JointMove({j: float(rest[j]) for j in BODY}, None, "to sleep first"))
+        pose = {**pose, **steps[-1].pose}
     try:
-        if box.location != "pack":
-            mv = plan_box_move(model, box, box.location, "pack", pose, cfg, obstacles)
-            steps += mv.steps
-            pose = last_pose(mv.steps)
+        if box.location != "pack":  # set down, back out, straight up, fold to sleep (like the box move out)
+            mv = plan_box_move(model, box, box.location, "pack", pose, cfg, obstacles, rest=rest)
+            steps += swivel_first(mv.steps, rest, pose)
+            pose = {**pose, **last_pose(mv.steps)}
         b0 = ProgramBuilder(model, pose)
-        retreat_up(model, b0, T_box, "up and away from the box")
+        if rest is None:
+            retreat_up(model, b0, T_box, "up and away from the box")
     except PathError as e:
         raise failed(e) from e
     steps += b0.steps
@@ -337,22 +344,31 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
             pick = plan_pocket_pick(model, cfg.tray, cfg.gripper, cal, slot, pose)
         except PathError as e:
             raise failed(e.wrap(f"{what}: {e}")) from e
+        pick_steps = swivel_first(pick.steps, rest, pose)
         try:
-            check_clear_of_box(model, [_Start(pose), *pick.steps], T_box, lengths.get(pick.sku, 60.0) / 1000,
+            check_clear_of_box(model, [_Start(pose), *pick_steps], T_box, lengths.get(pick.sku, 60.0) / 1000,
                                f"item {i + 1} ({pick.sku} from {slot})")
         except PathError as e:
-            raise failed(e, pick.steps) from e
-        b = ProgramBuilder(model, last_pose(pick.steps))
+            raise failed(e, pick_steps) from e
+        # carry the part back through sleep (folded over the base, the part pointing up), turn there toward the
+        # box, then come out over it — no free swing straight from the tray to the box
+        held = last_pose(pick_steps)
+        try:
+            fold = rest_move(model, held, rest, around, desk, f"{what}: holding the part")
+        except PathError as e:
+            raise failed(e, pick_steps) from e
+        via = dict(fold[-1].pose) if fold else held
+        b = ProgramBuilder(model, via)
         try:
             drop = plan_drop(model, b, T_box, lengths.get(pick.sku, 60.0), pick.open_value,
                              f"item {i + 1} ({pick.sku} from {slot})",
                              part_height_mm=part_height_mm(types.get(pick.sku), pick.grip_mm),
                              jaw_offset_mm=pick.side_offset_mm)
         except PathError as e:
-            raise failed(e, list(pick.steps) + list(e.steps or [])) from e
+            raise failed(e, list(pick_steps) + fold + list(e.steps or [])) from e
         base = len(steps)
-        steps += pick.steps + b.steps
-        item_steps.append({"start": base, "taken": base + len(pick.steps), "end": len(steps)})
+        steps += pick_steps + fold + swivel_first(b.steps, rest, via)
+        item_steps.append({"start": base, "taken": base + len(pick_steps), "end": len(steps)})
         pose = b.pose
         to_rest(what)
         items.append({"pocket": slot, "sku": pick.sku, "pitch_deg": pick.pitch_deg,
@@ -362,7 +378,7 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
         out = plan_box_move(model, box, "pack", "output", pose, cfg, obstacles, rest=rest)
     except PathError as e:
         raise failed(e) from e
-    steps += out.steps
+    steps += swivel_first(out.steps, rest, pose)
     check_desk_clear(model, current, steps, desk, f"order {order.id}")  # picks + drops too, not just box moves
     if not any(isinstance(s, OpenGripper) for s in steps):
         raise AssertionError("no release step")  # can't happen: every drop and box move opens

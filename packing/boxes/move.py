@@ -168,6 +168,25 @@ def rest_move(model: ArmModel, start: dict, rest: dict | None, obstacles: list[B
     return [JointMove(rest, None, "back to sleep")]
 
 
+def swivel_first(steps: list[Step], rest: dict | None, start: dict) -> list[Step]:
+    """Leaving the rest pose: turn the base (and wrist roll) at the rest pose first, then come out — the free move
+    out is then only lift / elbow / wrist in the arm's vertical plane (user: sleep is safe, rotate from there, then
+    reach). `steps` = a sub-plan starting at `start`; unchanged if `start` isn't the rest pose."""
+    from ..joints import BODY
+    from ..motion.program import JointMove
+
+    if rest is None or max(abs(float(rest[j]) - start[j]) for j in BODY) > 0.5:
+        return steps
+    k = next((i for i, st in enumerate(steps) if isinstance(st, JointMove)), None)
+    if k is None:
+        return steps
+    target = steps[k].pose
+    turn = {**{j: start[j] for j in BODY}, "shoulder_pan": target["shoulder_pan"], "wrist_roll": target["wrist_roll"]}
+    if max(abs(turn[j] - start[j]) for j in BODY) < 0.5:
+        return steps
+    return [*steps[:k], JointMove(turn, None, "turn at sleep"), *steps[k:]]
+
+
 def arm_points(model: ArmModel, q: dict) -> list[np.ndarray]:
     """Points along the arm's center line (link origins + midpoints), shoulder to jaw tip."""
     frames = model.link_frames(q)
