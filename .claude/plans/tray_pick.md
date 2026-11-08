@@ -50,6 +50,20 @@ Fully open (`gripper.open: 60`) is ~98 mm at the fingertips — far too wide. Pi
 (piezo 12: estimate). Values: aa 14.5, 9v 21.4, piezo 12.5, glue 12.7, breadboard 7.1 units. The runner logs the
 measured grip width (`last.grip_width`, activity "gripped at width …") → use it to check L / the widths.
 
+### Fixed jaw offset + jaw tips (2026-11-07, from the SO-101 meshes)
+Measured from TheRobotStudio/SO-ARM100 `wrist_roll_follower_so101_v1.stl` (fixed jaw) and `moving_jaw_so101_v1.stl`
+in the tool frame: the **fixed jaw's inner face is at x ≈ 0 (through the tool point)**, its body on +x; the
+moving jaw is on −x, opens toward −x, touches at URDF −10° (= gripper 0). So the planner aims the tool point
+beside the part: `aim = pocket + side · (grip_mm/2 + open_margin_mm/2)`, side = tool +x in the tray plane
+(`side_offset_mm`). Both jaw orientations (roll 180° apart) are planned; roll nearest mid-range wins.
+Mesh check at the planned grasp (aa_1/3/7, glue_4, 9v_2, piezo_4): fixed jaw 4–5 mm clear of the part, open moving
+jaw 6–7 mm, moving jaw meets the part at 8–18 units (≫ min_grip 3).
+**Open: jaw tips stick out ~6 mm past the tool point along z.** At the planned grasp the fixed-jaw tip reaches
+~2 mm *below* the calibrated face (pitched). The tray was calibrated by touching with the tips, so the calibrated
+face is likely ~5–6 mm in front of the real plate → real tips ~4–5 mm off the plate, ~5 mm overlap of the 10 mm
+protrusion. Proper fix (needs the user's OK): make the tool point the real fingertip (gripper_frame + ~6 mm z, or
+a `fingertip` frame) and recalibrate the tray; then grasp_standoff = real tip clearance.
+
 ## Interfaces
 - `POST /api/arm/pick {pocket, confirm_move}` — dry run unless `confirm_move`; same runner/Stop/state
   (`GET /api/arm/goto`) as go-to. Does **not** change inventory (test; drop spot TBD).

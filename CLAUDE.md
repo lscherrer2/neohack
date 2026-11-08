@@ -120,11 +120,14 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   dashboard "Pick test…" in the Go-to box; same runner/Stop as go-to): open → free move to approach point → line in
   to `grasp_standoff_mm` (0.15 in) off the face (gripper opened only to the part width + `gripper.open_margin_mm`:
   `GripperCfg.open_for`, chord of the jaw swing, `jaw_length_mm` 80 URDF estimate, deg/unit from the calibration;
-  part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate) → grip (miss: open + back out) → pull straight out `pull_mm` (150,
+  part width = type `grip_mm` or the DXF feature; piezo `grip_mm: 12` is an estimate; tool point aimed beside
+  the part toward the **fixed jaw** — its inner face is at the tool point, from the meshes — by radius + half margin)
+  → grip (miss: open + back out) → pull straight out `pull_mm` (150,
   else `extract_mm` 120) → lift `lift_mm` → hold. Jaws close along gripper_frame x (= type `grip_axis`; per-type
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
   uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
-  jaws tilt with the pitch, up to ~40°). **No inventory change** (test); drop spot TBD; `Cell` doesn't pick from
+  jaws tilt with the pitch, up to ~40°). Jaw tips stick out ~6 mm past the tool point (open question:
+  fingertip tool point + recalibration, see the plan). **No inventory change** (test); drop spot TBD; `Cell` doesn't pick from
   pockets yet. Not yet run on the real arm.
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`

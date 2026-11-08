@@ -97,7 +97,15 @@ class PickPlanTests(unittest.TestCase):
                 # grasp: 0.15 in off the tray face, on the normal through the pocket
                 g = MODEL.tip(line_in.path[-1])
                 self.assertAlmostEqual(float((g - c) @ n) * 1000, t.grasp_standoff_mm, delta=0.5)
-                self.assertLess(np.linalg.norm(g - (c + n * t.grasp_standoff_mm / 1000)) * 1000, 2.0)
+                # ...beside the part: the tool point (= the fixed jaw's inner face) is shifted toward the fixed jaw
+                # (tool +x) by radius + clearance, so the part sits on the moving-jaw side, centered in the opening
+                x = MODEL.fk(line_in.path[-1])[:3, 0]
+                side = x - n * float(x @ n)
+                side /= np.linalg.norm(side)
+                aim = c + n * t.grasp_standoff_mm / 1000 + side * plan.side_offset_mm / 1000
+                self.assertLess(np.linalg.norm(g - aim) * 1000, 2.0)
+                self.assertAlmostEqual(plan.side_offset_mm, plan.grip_mm / 2 + self.cfg.gripper.open_margin_mm / 2)
+                self.assertLess(float((c - g) @ x), 0)  # part center is on the moving jaw's side (-x)
                 # jaws close along the type's grip direction (tool x), up to the 5-DOF tilt
                 # (pitching down turns about the sideways jaw axis: sideways grips stay aligned; the breadboard's
                 # up/down grip tilts with the pitch — reported as jaw_off_deg)

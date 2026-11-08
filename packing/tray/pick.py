@@ -28,6 +28,12 @@ from scipy.spatial.transform import Rotation
 from ..motion.kinematics import ArmModel, PathError
 from ..motion.program import JOINT_LIMIT, MAX_IK_ERR_M, LineMove, OpenGripper, ProgramBuilder, Step, describe
 
+# Jaw geometry, measured from the SO-101 meshes (TheRobotStudio/SO-ARM100 wrist_roll_follower / moving_jaw STL,
+# 2026-11-07), in the tool frame (gripper_frame_link): the FIXED jaw's inner face lies at x ~ 0 (through the
+# tool point) and its body extends to +x; the MOVING jaw is on -x and opens toward -x (touches at gripper 0).
+# So the part must sit on the -x side: tool point = part center + (face + radius + clearance) * tool x.
+# The jaw tips stick out ~5-6 mm past the tool point along z (calibration touches used the tips: mostly cancels).
+FIXED_JAW_FACE_MM = 0.0
 IN_SPEED_MM_S = 15.0  # final approach to the part
 PULL_SPEED_MM_S = 20.0  # pulling the part out
 LIFT_SPEED_MM_S = 30.0
@@ -41,6 +47,7 @@ class PickSettings:
     min_grip: float  # gripper units: closing tighter than this = missed / dropped
     grip_mm: float = 0.0  # part width between the jaws
     open_value: float | None = None  # gripper value to open to (part width + margin); None = fully open
+    fixed_jaw_offset_mm: float = 0.0  # tool point -> part center, toward the moving jaw (see FIXED_JAW_FACE_MM)
     protrusion_mm: float = 10.0
     approach_mm: float = 30.0  # approach point = protrusion + this, out from the face
     grasp_standoff_mm: float = 3.81  # tool tip off the tray face when it closes (0.15 in)
@@ -58,6 +65,7 @@ class PickSettings:
         return cls(grip_axis=t.grip_axis,
                    min_grip=t.min_grip if t.min_grip is not None else gripper_cfg.min_part_width,
                    grip_mm=t.grip_width_mm, open_value=round(gripper_cfg.open_for(t.grip_width_mm), 1),
+                   fixed_jaw_offset_mm=FIXED_JAW_FACE_MM + t.grip_width_mm / 2 + gripper_cfg.open_margin_mm / 2,
                    protrusion_mm=tray_cfg.protrusion_mm, approach_mm=tray_cfg.approach_mm,
                    grasp_standoff_mm=tray_cfg.grasp_standoff_mm, pull_mm=tray_cfg.pull_mm,
                    extract_mm=tray_cfg.extract_mm, lift_mm=tray_cfg.lift_mm,
@@ -80,6 +88,7 @@ class PickPlan:
     jaw_off_deg: float = 0.0  # jaw closing axis vs the wanted grip direction at the grasp
     grip_mm: float = 0.0
     open_value: float | None = None
+    side_offset_mm: float = 0.0  # tool point aimed this far from the part center, toward the fixed jaw
 
     @property
     def label(self) -> str:
@@ -91,6 +100,7 @@ class PickPlan:
                 "lift_mm": round(self.lift_mm, 1), "grasp_standoff_mm": self.grasp_standoff_mm,
                 "travel_units": round(self.travel_units, 1), "pull_twist_deg": round(self.pull_twist_deg, 1),
                 "jaw_off_deg": round(self.jaw_off_deg, 1), "grip_mm": self.grip_mm, "open_value": self.open_value,
+                "side_offset_mm": round(self.side_offset_mm, 2),
                 "steps": describe(self.steps)}
 
 
@@ -136,12 +146,12 @@ class AxisIK:
         return pose, float(np.linalg.norm(m.tip(pose) - p))
 
 
-def best_targets(model: ArmModel, ik: AxisIK, p: np.ndarray, inward: np.ndarray, close_dir: np.ndarray,
+def best_targets(model: ArmModel, ik: AxisIK, p: np.ndarray, inward: np.ndarray, jaw_x: np.ndarray,
                  seeds: list[dict[str, float]]) -> tuple[list[np.ndarray], list[dict[str, float]]]:
-    """Achievable tool targets at p for jaws along +close_dir and -close_dir (same grip, other wrist roll),
-    best first, plus the joint poses that reach them (use as IK seeds)."""
+    """Achievable tool targets at p with tool x along `jaw_x` (toward the fixed jaw), best first, plus the joint
+    poses that reach them (use as IK seeds)."""
     sols = []
-    for d in (close_dir, -close_dir):
+    for d in (jaw_x,):
         for seed in seeds:
             q, err = ik.solve(seed, p, inward, d)
             over = any(abs(v) > JOINT_LIMIT for v in q.values())
@@ -180,34 +190,45 @@ def plan_pick(model: ArmModel, pocket: str, sku: str, point_m: np.ndarray, norma
     n = np.asarray(normal, float) / np.linalg.norm(normal)
     c = np.asarray(point_m, float)
     close_dir = np.asarray(close_dir, float)
-    approach = c + n * (s.protrusion_mm + s.approach_mm) / 1000
-    grasp = c + n * s.grasp_standoff_mm / 1000
     pitches = np.arange(0.0, s.max_pitch_deg + 1e-9, s.pitch_step_deg)
     pulls = sorted({s.pull_mm, s.extract_mm}, reverse=True)
     errors = []
     for pull in pulls:
         for pitch in pitches:
-            try:
-                return _plan_one(model, pocket, sku, c, n, close_dir, approach, grasp, current, s,
-                                 float(pitch), pull)
-            except PathError as e:
-                errors.append(f"pitch {pitch:.0f}°/pull {pull:.0f} mm: {e}")
+            # the fixed jaw can be on either side of the part (wrist roll 180° apart): plan both, keep the one
+            # whose wrist roll is nearest mid-range
+            plans = []
+            for jaw_x in (close_dir, -close_dir):
+                try:
+                    plans.append(_plan_one(model, pocket, sku, c, n, jaw_x, current, s, float(pitch), pull))
+                except PathError as e:
+                    errors.append(f"pitch {pitch:.0f}°/pull {pull:.0f} mm: {e}")
+            if plans:
+                return min(plans, key=lambda pl: abs(pl.steps[1].pose["wrist_roll"]))
     raise PathError(f"no tool pitch up to {s.max_pitch_deg:.0f}° fits a {pulls[-1]:.0f} mm pull-out from "
                     f"{pocket}. Last: {errors[-1]}")
 
 
-def _plan_one(model, pocket, sku, c, n, close_dir, approach, grasp, current, s, pitch, pull) -> PickPlan:
+def _plan_one(model, pocket, sku, c, n, jaw_x, current, s, pitch, pull) -> PickPlan:
+    """One candidate: tool x (toward the fixed jaw) along `jaw_x`. The tool point is aimed beside the part:
+    shifted toward the fixed jaw (in the tray plane) so the fixed jaw clears the part and the part sits centered
+    in the opening."""
+    side = jaw_x - n * float(jaw_x @ n)
+    side /= np.linalg.norm(side)
+    aim = c + side * s.fixed_jaw_offset_mm / 1000
+    approach = aim + n * (s.protrusion_mm + s.approach_mm) / 1000
+    grasp = aim + n * s.grasp_standoff_mm / 1000
+    close_dir = jaw_x
     inward = pitched(-n, pitch)
     b = ProgramBuilder(model, current)
     seeds = _seeds(current)
     # cheap reject first: the far end of the pull is the hardest point to reach
-    far = c + n * (s.grasp_standoff_mm + pull) / 1000
+    far = aim + n * (s.grasp_standoff_mm + pull) / 1000
     ik = AxisIK(model)
     targets, poses = best_targets(model, ik, far, inward, close_dir, seeds)
     ProgramBuilder(model, current).joint_to(targets[0], "pull-out end", poses, targets=targets[:1])
 
     b.open_gripper(f"open to {s.open_value} (part {s.grip_mm:g} mm + margin)", s.open_value)
-    # the jaws are (near) symmetric: closing along +x or -x is the same grip — take whichever wrist roll fits
     targets, poses = best_targets(model, ik, approach, inward, close_dir, seeds)
     move = b.joint_to(targets[0], "approach point", poses, targets=targets)
     travel = max(abs(move.pose[j] - b.start[j]) for j in move.pose)
@@ -230,11 +251,11 @@ def _plan_one(model, pocket, sku, c, n, close_dir, approach, grasp, current, s, 
     b.check_holding(s.min_grip, "check holding after lift")
     R_grasp = model.fk(line_in.path[-1])[:3, :3]
     tilt = _angle(R_grasp[:, 2], -n)
-    jaw_off = min(_angle(R_grasp[:, 0], close_dir), _angle(R_grasp[:, 0], -close_dir))
+    jaw_off = _angle(R_grasp[:, 0], jaw_x)
     pull_path = next(st for st in b.steps if isinstance(st, LineMove) and st.label.startswith("pull")).path
     twist = max(math.degrees(Rotation.from_matrix(R_grasp.T @ model.fk(q)[:3, :3]).magnitude()) for q in pull_path)
     return PickPlan(pocket, sku, [round(float(v), 5) for v in c], b.steps, pitch, tilt, pull, lift,
-                    s.grasp_standoff_mm, travel, twist, jaw_off, s.grip_mm, s.open_value)
+                    s.grasp_standoff_mm, travel, twist, jaw_off, s.grip_mm, s.open_value, s.fixed_jaw_offset_mm)
 
 
 def _angle(a: np.ndarray, b: np.ndarray) -> float:
