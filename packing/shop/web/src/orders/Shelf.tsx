@@ -9,8 +9,8 @@ export default function Shelf({ stock, refreshState }: { stock: StockItem[] | nu
   async function restock() {
     setBusy(true);
     try {
-      const d = await api<{ parts_added: number; boxes_added: number }>("POST", "/api/shelf/restock");
-      setNote(`Added ${d.parts_added} parts and ${d.boxes_added} boxes.`);
+      const d = await api<{ parts_added: number }>("POST", "/api/shelf/restock");
+      setNote(`Added ${d.parts_added} parts.`);
     } catch (e) {
       setNote(`Restock failed: ${errText(e)}`);
     }

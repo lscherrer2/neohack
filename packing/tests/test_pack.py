@@ -11,11 +11,13 @@ from fastapi.testclient import TestClient
 from scipy.spatial.transform import Rotation
 
 from packing.boxes.geometry import BOX_H, BOX_W, WALL, box_frame, obstacles
-from packing.boxes.pack import plan_pack_order
+from packing.boxes.pack import (FIT_MARGIN_MM, MAX_JAW_TILT_DEG, RIM_CLEAR_MM, drop_pitches, part_height_mm,
+                                plan_pack_order, span_mm)
 from packing.boxes.packer import TrayPacker
 from packing.boxes.store import BoxStore
 from packing.config import load_config
 from packing.hardware.arm import FakeArm
+from packing.motion.kinematics import POSITION_TOL_M
 from packing.motion.program import Grip, OpenGripper
 from packing.service.orders import Order, OrderStore
 from packing.service.vapi import Catalog
@@ -27,6 +29,7 @@ from packing.tests.test_boxes import tool_in_box
 from packing.tests import test_tray
 from packing.tests.test_tray import temp_config, tilted_pose
 from packing.tray.calibration import calibrate
+from packing.tray.pick import PickSettings
 
 PAN = MODEL.pan_xy
 HOME = dict.fromkeys(["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"], 0.0)
@@ -68,18 +71,59 @@ class PlanTests(unittest.TestCase):
         grips = [s for s in plan.steps if isinstance(s, Grip)]
         self.assertEqual(len(grips), 2 + 3)  # box twice + three parts
         releases = [i for i, s in enumerate(plan.steps) if isinstance(s, OpenGripper) and "release" in s.label]
-        T_pack = box_frame((self.cfg.boxes.pack_spot_mm[0] / 1000, self.cfg.boxes.pack_spot_mm[1] / 1000), 0.0, PAN)
-        lengths = {t.sku: t.length_mm / 1000 for t in self.cfg.tray.types}
         drops = [i for i in releases if plan.steps[i].label.startswith("item")]
         self.assertEqual(len(drops), 3)
-        for i, sku in zip(drops, o.items):
-            T = MODEL.fk(plan.steps[i - 1].pose)  # the drop pose
-            mid = T[:3, 3] + T[:3, 2] * lengths[sku] / 2  # the held part is centered over the opening...
-            self.assertLess(np.linalg.norm((mid - T_pack[:3, 3])[:2]) * 1000, 3.0)
-            end = T_pack[:3, :3].T @ (T[:3, 3] + T[:3, 2] * lengths[sku] - T_pack[:3, 3])
-            self.assertGreater(end[2], WALL)  # ...its end above the floor
-            self.assertGreater(T[2, 3], T_pack[2, 3] + BOX_H)  # jaws above the rim
+        self.assert_side_releases(plan, drops, o.items)
         self.assertEqual(plan.steps[-1].label, "back out level along the tab")  # ends releasing the box at output
+
+    def assert_side_releases(self, plan, drops, skus):
+        """Every release: jaws closing horizontally, the part's center over the opening, jaws + part above the rim."""
+        T_pack = box_frame((self.cfg.boxes.pack_spot_mm[0] / 1000, self.cfg.boxes.pack_spot_mm[1] / 1000), 0.0, PAN)
+        types = {t.sku: t for t in self.cfg.tray.types}
+        rim = T_pack[2, 3] + BOX_H + RIM_CLEAR_MM / 1000 - POSITION_TOL_M
+        for i, sku in zip(drops, skus):
+            with self.subTest(step=plan.steps[i].label):
+                T = MODEL.fk(plan.steps[i - 1].pose)  # the release pose
+                z, x, L = T[:3, 2], T[:3, 0], types[sku].length_mm / 1000
+                self.assertLess(abs(x[2]), np.sin(np.radians(MAX_JAW_TILT_DEG)))  # jaw axis level
+                self.assertLessEqual(-z[2], np.sin(np.radians(70)))  # level or pitched down, never pointing down
+                off = PickSettings.for_type(self.cfg.tray, sku, self.cfg.gripper).fixed_jaw_offset_mm / 1000
+                mid = T[:3, 3] + z * L / 2 - x * off  # the held part's center...
+                self.assertLess(np.linalg.norm((mid - T_pack[:3, 3])[:2]), POSITION_TOL_M + 1e-4)  # ...over the box
+                low = T[2, 3] + min(0.0, z[2]) * L - part_height_mm(types[sku]) / 2000
+                self.assertGreater(T[2, 3], rim)  # jaws above the rim
+                self.assertGreater(low, rim)  # the whole part too
+                self.assertIn("up and away", plan.steps[i + 1].label)  # retreat after letting go
+
+    def test_every_pocket_releases_level_jaws_over_the_opening(self):
+        """All 33 pockets in one order (sim calibration, pack spot from cell.yaml)."""
+        slots = [p.id for p in self.cfg.tray.layout().pockets]
+        skus = [s.rsplit("_", 1)[0] for s in slots]
+        plan = plan_pack_order(MODEL, self.cfg, self.cal, order(3, slots, skus), self.box, HOME,
+                               obstacles(self.cfg, {}))
+        self.assertEqual(len(plan.items), 33)
+        drops = [i for i, s in enumerate(plan.steps) if isinstance(s, OpenGripper) and s.label.startswith("item")
+                 and "release" in s.label]
+        self.assertEqual(len(drops), 33)
+        self.assert_side_releases(plan, drops, skus)
+        by_sku = {}
+        for it in plan.items:
+            by_sku.setdefault(it["sku"], []).append(it)
+        self.assertTrue(all(it["drop_fits_opening"] for it in plan.items))
+        self.assertTrue(all(it["drop_tilt_deg"] < 15 for s in ("aa", "9v", "piezo", "breadboard") for it in by_sku[s]))
+        self.assertTrue(all(it["drop_tilt_deg"] > 50 for it in by_sku["glue"]))  # longer than the opening: end first
+        for e in plan.item_steps:  # bookkeeping kept intact: each item's drop ends where the next pick starts
+            self.assertLess(e["start"], e["taken"])
+            self.assertLess(e["taken"], e["end"])
+        self.assertEqual([e["start"] for e in plan.item_steps[1:]], [e["end"] for e in plan.item_steps[:-1]])
+
+    def test_drop_pitches(self):
+        self.assertEqual(drop_pitches(50, 15.5)[0], 0.0)  # fits level: level first
+        p = drop_pitches(120, 12.5)  # glue: longer than the 74.6 mm opening
+        self.assertGreater(p[0], 45)
+        self.assertLessEqual(span_mm(120, 12.5, p[0]), (BOX_W - 2 * WALL) * 1000 - 2 * FIT_MARGIN_MM)
+        self.assertGreater(span_mm(120, 12.5, p[0] - 5), (BOX_W - 2 * WALL) * 1000 - 2 * FIT_MARGIN_MM)
+        self.assertIn(0.0, p)  # level stays as the fallback
 
     def test_needs_every_unit_reserved(self):
         with self.assertRaises(ValueError):

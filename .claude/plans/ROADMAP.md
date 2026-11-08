@@ -73,16 +73,16 @@ The system is a stack: each layer only works if the ones under it do. Status per
 - 🟡 **Pick from a pocket** (`tray/pick.py`, plan `tray_pick.md`): all 33 pockets plan on the real calibration
   with the tool pitched 20–40° down. Not yet run on the real arm.
 - 🟡 **Box moves** (`boxes/move.py`): level tab grip, direct carry or arc over obstacles, 3D-checked. Sim only.
-- 🟡 **Release into the box** (`plan_drop`): today gripper pointing down over the box (reach-limited) →
-  being changed to a side release (Next steps §3).
+- 🟡 **Release into the box** (`plan_drop`): side release, jaws closing horizontally, tool level (glue pitched
+  ~65°, end first), part center over the box. All 33 pockets plan at the pack spot. Sim only.
 - Known physics risk (accepted): off-center pockets are gripped tilted 10–20° (no wrist yaw).
 
 ### 6. Orchestration & inventory 🟡
 - ✅ SQLite inventory (`cell/inventory.py`) for tray pockets; humans mark pockets full/empty on the dashboard.
 - ✅ Per-unit reservations (orders DB): each order item owns a pocket.
-- 🟡 `TrayPacker` (`boxes/packer.py`) is **the** packer (user decision 2026-11-07). It consumes the reserved units
-  only at the end of the order → changing to per item (Next steps §4).
-- 🔴 The old `Cell` / `RobotPacker` path (taught poses, can't pick from the tray) is to be deleted (Next steps §1).
+- 🟡 `TrayPacker` (`boxes/packer.py`) is **the** packer (user decision 2026-11-07). Each unit is marked used as
+  soon as it's out of its pocket; a missed grip marks the pocket empty and stops the order. Sim only.
+- ✅ The old `Cell` / `RobotPacker` path was deleted (2026-11-07).
 
 ### 7. Orders, queue & robot agent ✅ (mostly)
 - ✅ Order DB (`service/orders.py`, `data/shop_orders.db`). Lifecycle:
@@ -92,7 +92,8 @@ The system is a stack: each layer only works if the ones under it do. Status per
   returns the in-progress order first, stock reservations, delete/cancel rules.
 - ✅ Robot agent (`shop/robot_agent.py`): claim → pack → report; exits on a packing failure; with `start --robot`
   it packs through `TrayPacker` on the hub's arm. Simulated packing (`ShelfSimPacker`) uses up real inventory.
-- **Missing:** "picked up" for boxes at output (Next steps §2); customer notification (with Vapi).
+- ✅ "Picked up" for packed boxes at output (Calibration → Packing boxes). Boxes move one way only.
+- **Missing:** customer notification (with Vapi).
 
 ### 8. Interfaces: MCP, chat, dashboard 🟡
 - ✅ MCP server at `/mcp` with `list_products`, `place_order`, `check_order`, `cancel_order`. Stock = full tray
@@ -121,7 +122,7 @@ The system is a stack: each layer only works if the ones under it do. Status per
   - Secrets handling (keys in `.env.local`, never printed).
 
 ### Cross-cutting
-- **Tests:** 100 sim tests (`.venv/bin/python -m unittest discover -s packing/tests -t .`). New manipulation code
+- **Tests:** 142 sim tests (`.venv/bin/python -m unittest discover -s packing/tests -t .`). New manipulation code
   needs FakeArm tests first (plan validation, inventory transitions, failure paths), then supervised hardware runs.
 - **Repo:** `tray-core` and the remote `main` were merged into `main` (2026-11-07). Work on `main` or short
   feature branches from here. `.zed/settings.json` (editor settings) came in from `main`.
@@ -160,67 +161,74 @@ cleanup, a new release pose, inventory bookkeeping and the first hardware runs.
 
 ---
 
+**Status 2026-11-07:** steps 1–5 and 7 are done in sim (branch `order-procedure`); step 6 (hardware) is next.
+Notes: `robot --robot` exits with a hint (packing on the real arm = `start --robot`); `/api/boxes/{id}/reset` was
+removed (new boxes only via Add box); refusals before the arm moves put the order back to "received". Pack spot:
+355 kept; 365 and 355 ± 50 y also plan all 33 pockets; from 380 glue only fits level (lands across the rim).
+The cross-process telemetry path (`POST /robot/telemetry`, `http_publisher`, `ArmHub.external`) was removed too:
+`serve` without `--robot` now owns a simulated arm like `start`.
+
 ### 1. Delete the old Cell path
 Files that use it: `packing/cell/procedures.py`, `packing/service/worker.py` (`RobotPacker`),
 `packing/service/__main__.py`, `packing/shop/__main__.py` (`make_packer`), `packing/cli.py`,
 `packing/tests/test_packing.py`.
-- [ ] Delete `cell/procedures.py` and `RobotPacker`. `make_packer` with `--robot` → always `TrayPacker` (it
+- [x] Delete `cell/procedures.py` and `RobotPacker`. `make_packer` with `--robot` → always `TrayPacker` (it
       needs the hub, so only in-process: `start --robot` / `serve --robot`). `robot --robot` as a separate
       process goes away; `robot` without `--robot` stays as the sim packer.
-- [ ] CLI: remove `pack`, `move-box`, `set-box`, `clear-output`, `teach-all`/`check` (if they only exist for
+- [x] CLI: remove `pack`, `move-box`, `set-box`, `clear-output`, `teach-all`/`check` (if they only exist for
       Cell poses). Keep `teach`/`goto`/`where`/`home`/`release`/`tune`/`demo`/`tray`/`tray-calibrate`/`status`/
       `events`/`set-part`/`restock`.
-- [ ] `cell/inventory.py` stays (the shelf uses it for tray pockets). Drop its box part (box table/`restock` of
+- [x] `cell/inventory.py` stays (the shelf uses it for tray pockets). Drop its box part (box table/`restock` of
       "box supply spots"): boxes live only in the orders DB `boxes` table.
-- [ ] `cell.yaml`: remove the Cell-only placeholders (`box_in_*`, `pack_1`, `box_out_*`, `box_slot_1`,
+- [x] `cell.yaml`: remove the Cell-only placeholders (`box_in_*`, `pack_1`, `box_out_*`, `box_slot_1`,
       `box_slots`, `pack_station`, `part_slots`, if nothing else reads them). Check `config.py` and
       `max_items_per_order` (which uses `box_slots` today).
-- [ ] Parked `packing/service/`: keep `orders.py` and `vapi.py` (the shop uses them). Delete or stub anything that
+- [x] Parked `packing/service/`: keep `orders.py` and `vapi.py` (the shop uses them). Delete or stub anything that
       only fed `RobotPacker`.
-- [ ] Tests: drop or port `test_packing.py`. The whole suite passes.
+- [x] Tests: drop or port `test_packing.py`. The whole suite passes.
 
 ### 2. One-way box flow
-- [ ] Box moves only go forward: supply → pack → output. Remove `to: supply` from `/api/arm/box-move` and the
+- [x] Box moves only go forward: supply → pack → output. Remove `to: supply` from `/api/arm/box-move` and the
       dashboard Move-a-box control. Remove `POST /api/boxes/{id}/reset` (or keep it only as a manual "this box
       is empty at supply again" fix; decide while doing it).
-- [ ] **Pack spot taken:** if another box is already at `pack`, refuse to start an order with a plain message
+- [x] **Pack spot taken:** if another box is already at `pack`, refuse to start an order with a plain message
       ("box N is still at the pack spot"), not a collision error.
-- [ ] **Output spot:** each box's output spot = its supply spot mirrored right (one per box, so finished boxes
+- [x] **Output spot:** each box's output spot = its supply spot mirrored right (one per box, so finished boxes
       never land on each other). Keep that. Packed boxes left at output stay obstacles for later moves (they are
       already).
-- [ ] **Picked up:** a "Picked up" button on a packed box (Orders or Calibration tab) deletes the box record, so
+- [x] **Picked up:** a "Picked up" button on a packed box (Orders or Calibration tab) deletes the box record, so
       it stops being an obstacle (`DELETE /api/boxes/{id}` already exists; just label and place it).
-- [ ] No empty box at supply → the order isn't started; message "add a box" (exists: `BoxError`).
+- [x] No empty box at supply → the order isn't started; message "add a box" (exists: `BoxError`).
 
 ### 3. Release with the jaws turned to the side
 Today `plan_drop` points the gripper straight down over the box. That's only reachable up to ~10 cm above the
 table, which limits the pack spot and the drops (365 mm+ already fails).
-- [ ] New release pose: the tool does **not** have to point down. Roll the wrist so the jaws close
+- [x] New release pose: the tool does **not** have to point down. Roll the wrist so the jaws close
       **horizontally** (gripper x level), so when they open there is nothing under the part and it falls straight
       down. Tool level or tilted down, whichever reaches; prefer level/slightly down for range.
-- [ ] Place the part's center (jaw point + half its length along the tool axis) over the box opening, jaws/part
+- [x] Place the part's center (jaw point + half its length along the tool axis) over the box opening, jaws/part
       above the rim + `RIM_CLEAR_MM`. Long parts (glue ~120 mm) stick out past the 76 mm opening; for a demo, the
       center over the opening is enough (it tips in).
-- [ ] The wrist roll may have to turn ~90° from the pick roll while holding the part. `wrist_roll` range is
+- [x] The wrist roll may have to turn ~90° from the pick roll while holding the part. `wrist_roll` range is
       ~337° (raw 142–3972), so it fits; plan the roll during the free move to the box.
-- [ ] Keep `check_clear_of_box` (the part/arm must not hit the box on the way in).
-- [ ] Sim check: all 33 pockets plan at pack spot 355. Then see whether the pack spot can move (more room).
-- [ ] Tests in `packing/tests/` (jaw axis level at the release, part center over the opening, above the rim).
+- [x] Keep `check_clear_of_box` (the part/arm must not hit the box on the way in).
+- [x] Sim check: all 33 pockets plan at pack spot 355. Then see whether the pack spot can move (more room).
+- [x] Tests in `packing/tests/` (jaw axis level at the release, part center over the opening, above the rim).
 
 ### 4. Mark parts removed as they're taken
 Today `shelf.consume_slots(order.slots)` runs once, after the whole order.
-- [ ] After each successful grip (the step after `check_holding` / pull-out): mark that pocket's part used
+- [x] After each successful grip (the step after `check_holding` / pull-out): mark that pocket's part used
       (`consume_slots([slot])`), so the tray map and stock update live. Drive it from `run(..., on_step=...)`
       by step label/index (planner returns which step finishes item i).
-- [ ] Order → `packed` and box → `packed` at `output` at the end (already).
-- [ ] Event-log line per item ("item 2/3: 9V from 9v_1 → box 1").
+- [x] Order → `packed` and box → `packed` at `output` at the end (already).
+- [x] Event-log line per item ("item 2/3: 9V from 9v_1 → box 1").
 
 ### 5. Empty pocket = mark empty and stop
-- [ ] If the grip closes on nothing (`check_holding` fails; the plan's `on_fail` already opens and backs out):
+- [x] If the grip closes on nothing (`check_holding` fails; the plan's `on_fail` already opens and backs out):
       mark the pocket **empty** (`shelf.set_slot(slot, False)`; the reservation then moves or goes short by
       itself), log it, stop the order → `failed`. Whatever already happened (box at the pack spot, parts in it)
       stays as is; a person sorts it out.
-- [ ] Test with `FakeArm` without `gripper_block` (missed grip → pocket empty, order failed, no crash).
+- [x] Test with `FakeArm` without `gripper_block` (missed grip → pocket empty, order failed, no crash).
 
 ### 6. Hardware bring-up (supervised, user says "go" before each motion)
 - [ ] Tray on the LEFT, recalibrate (Calibration tab, corners).
@@ -233,7 +241,7 @@ Today `shelf.consume_slots(order.slots)` runs once, after the whole order.
 - [ ] Mind the monitor near the arm: watch the first runs of every new move.
 
 ### 7. Docs
-- [ ] Update `CLAUDE.md` (layout, CLI, shop/boxes sections), `ROADMAP.md` (layers 5–7),
+- [x] Update `CLAUDE.md` (layout, CLI, shop/boxes sections), `ROADMAP.md` (layers 5–7),
       `boxes_and_reservations.md` (side release, one-way flow), `packing/README.md`.
 
 ### Not doing (demo)

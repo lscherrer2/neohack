@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # One-command demo: order server + public Cloudflare quick tunnel + Vapi tool definitions.
-#   packing/service/demo.sh            # simulated packing
-#   packing/service/demo.sh --robot    # pack on the real arm
+#   packing/service/demo.sh            # simulated packing (real packing: python -m packing.shop start --robot)
 # The public URL lasts as long as this script runs (Ctrl+C stops everything). A new run = a new URL.
 set -euo pipefail
 cd "$(dirname "$0")/../.."

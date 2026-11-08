@@ -134,16 +134,20 @@ class FixedJawTests(unittest.TestCase):
 
 class StoreTests(unittest.TestCase):
     def test_take_reuse_and_lifecycle(self):
-        s = BoxStore(OrderStore(":memory:"))
+        orders = OrderStore(":memory:")
+        s = BoxStore(orders)
         b1 = s.add(np.eye(4), np.eye(4), {}, {})
         b2 = s.add(np.eye(4), np.eye(4), {}, {})
-        self.assertEqual(s.take(7).id, b1.id)
-        self.assertEqual(s.take(7).id, b1.id)  # same order: same box
-        self.assertEqual(s.take(8).id, b2.id)
+        o7 = orders.create("", [], "A")[0].id
+        o8 = orders.create("", [], "B")[0].id
+        self.assertEqual(s.take(o7).id, b1.id)
+        self.assertEqual(s.take(o7).id, b1.id)  # same order: same box
+        self.assertEqual(s.take(o8).id, b2.id)
         with self.assertRaises(BoxError):
             s.take(9)
+        orders.claim_next("queued")  # order o7 is being packed
         with self.assertRaises(BoxError):
-            s.remove(b1.id)  # in use
+            s.remove(b1.id)  # in use by an order being packed
         s.update(b1.id, location="output", state="packed")
         s.remove(b1.id)
         self.assertEqual([b.id for b in s.list()], [b2.id])

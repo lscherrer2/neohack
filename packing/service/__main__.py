@@ -1,4 +1,4 @@
-"""python -m packing.service serve [--robot] [--port 8000]
+"""python -m packing.service serve [--port 8000]   (simulated packing only; parked, see README)
    python -m packing.service tools --url https://<public-host>/vapi/webhook
 
 Env (or packing/service/.env): VAPI_API_KEY, VAPI_PHONE_NUMBER_ID, VAPI_CALLBACK_ASSISTANT_ID,
@@ -28,33 +28,22 @@ def _load_dotenv(path: Path) -> None:
 
 
 def build_core(args):
-    """Order store, catalog and packer shared by `serve` and `chat`."""
+    """Order store, catalog and (simulated) packer shared by `serve` and `chat`. Real packing lives in
+    `python -m packing.shop start --robot` (TrayPacker)."""
     from ..config import load_config
-    from ..cell.inventory import Inventory
     from .orders import OrderStore
     from .vapi import Catalog
-    from .worker import RobotPacker, SimPacker
+    from .worker import SimPacker
 
     cfg = load_config(args.config)
-    products = cfg.catalog or {sku: f"product {sku}" for sku in dict.fromkeys(cfg.part_slots.values())}
-    if args.robot:
-        inv = Inventory(cfg.inventory_db)
+    products = cfg.catalog or {sku: f"product {sku}" for sku in dict.fromkeys(cfg.stock_slots.values())}
 
-        def available():
-            out: dict[str, int] = {}
-            for p in inv.parts("available"):
-                out[p.sku] = out.get(p.sku, 0) + 1
-            return out
+    def available():
+        return dict.fromkeys(products, 99)
 
-        packer = RobotPacker(args.config)
-    else:
-        def available():
-            return dict.fromkeys(products, 99)
-
-        packer = SimPacker(args.sim_seconds)
     catalog = Catalog(products, max_items=cfg.max_items_per_order, available=available)
     store = OrderStore(args.db or cfg.inventory_db.with_name("orders.db"))
-    return store, catalog, packer
+    return store, catalog, SimPacker(args.sim_seconds)
 
 
 def build(args):
@@ -75,12 +64,10 @@ def main() -> None:
     s = sub.add_parser("serve")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--robot", action="store_true", help="pack on the real arm (default: simulated packing)")
     s.add_argument("--sim-seconds", type=float, default=2.0, help="simulated packing time per item")
     s.add_argument("--db", help="orders database (default packing/data/orders.db)")
     c = sub.add_parser("chat", help="terminal stand-in for the Vapi phone agent (Claude Haiku)")
     c.add_argument("--caller", default="+15551234567", help="the phone number you're 'calling from'")
-    c.add_argument("--robot", action="store_true", help="pack on the real arm (default: simulated packing)")
     c.add_argument("--sim-seconds", type=float, default=3.0, help="simulated packing time per item")
     c.add_argument("--db", help="orders database (default packing/data/orders.db)")
     c.add_argument("--server", help="send tool calls to a running `serve` (e.g. http://localhost:8000) instead of in-process")

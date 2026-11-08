@@ -5,7 +5,8 @@ import ConfirmDialog from "../calibration/ConfirmDialog";
 import type { ArmState, BoxesState, BoxInfo } from "../types";
 
 type Dest = BoxInfo["location"];
-const DEST: Record<Dest, string> = { supply: "back to its left spot", pack: "to the pack spot (middle)", output: "to its right spot (done)" };
+const DEST: Record<Dest, string> = { supply: "its left spot", pack: "to the pack spot (middle)", output: "to its right spot (done)" };
+const ORDER: Dest[] = ["supply", "pack", "output"]; // boxes only move left → right
 
 interface MoveReply {
   plan: { box_id: number; from: Dest; to: Dest; travel_units: number; carry_mm: number; land_tilt_deg: number;
@@ -22,14 +23,14 @@ export default function BoxMoveBox({ arm, boxes, onMoved }: {
   const list = boxes?.boxes ?? [];
   const [boxId, setBoxId] = useState<number | null>(null);
   const box = list.find((b) => b.id === boxId) ?? list[0];
-  const dests = (["pack", "output", "supply"] as Dest[]).filter((d) => d !== box?.location);
+  const dests = box ? ORDER.slice(ORDER.indexOf(box.location) + 1) : [];
   const [dest, setDest] = useState<Dest>("pack");
   const to = dests.includes(dest) ? dest : dests[0];
   const [plan, setPlan] = useState<MoveReply | null>(null);
   const [busy, setBusy] = useState<"plan" | "go" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const moving = arm?.mode === "moving";
-  const canPlan = !!arm?.connected && arm.mode === "idle" && !!box;
+  const canPlan = !!arm?.connected && arm.mode === "idle" && !!box && !!to;
 
   /** `pathTitle`: a dry run — show its planned path (or where it fails) in the 3D view. */
   async function post<T>(what: typeof busy, url: string, body?: unknown, pathTitle?: string): Promise<T | null> {

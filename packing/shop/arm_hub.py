@@ -4,7 +4,6 @@
   and computes FK link frames for the dashboard's 3D view.
 - `borrow()` lends the arm to in-process packing; reads made by Motion keep the view live meanwhile.
 - `set_torque()` / `read_tip()` serve the calibration tab (motors off, hand-guided tip capture).
-- `external()` accepts telemetry from a robot agent running in another process (it owns the port then).
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ class _Lent(TelemetryArm):
 
 class ArmHub:
     def __init__(self, open_arm: Callable[[], Arm] | None, source: str, model_factory: Callable[[], object] | None = None,
-                 poll_s: float = 0.1, stale_after_s: float = 2.0, clock: Callable[[], float] = time.monotonic,
+                 poll_s: float = 0.1, clock: Callable[[], float] = time.monotonic,
                  tune: dict | None = None, gravity_factory: Callable[[], Callable | None] | None = None):
         """open_arm: opens the arm (None = this process never owns it, e.g. the robot agent runs elsewhere).
         model_factory: returns an ArmModel (FK); None or a failing factory = no 3D frames, joints only.
@@ -56,7 +55,7 @@ class ArmHub:
         self._open_arm, self.source = open_arm, source
         self._tune, self._gravity_factory, self._gravity, self._gravity_done = tune or {}, gravity_factory, None, False
         self._model_factory, self._model, self._model_failed = model_factory, None, False
-        self.poll_s, self.stale_after_s, self.clock = poll_s, stale_after_s, clock
+        self.poll_s, self.clock = poll_s, clock
         self.arm: Arm | None = None
         self.torque: bool | None = None
         self.mode = "idle"  # idle | calibrating | packing | moving
@@ -170,20 +169,14 @@ class ArmHub:
         self._latest = {"joints": {k: round(float(v), 2) for k, v in joints.items()}, "torque": torque,
                         "source": source, "t": self.clock(), "frames": frames, "tip": tip}
 
-    def external(self, joints: dict[str, float], torque: bool, source: str = "remote") -> None:
-        """Telemetry posted by a robot agent in another process. Ignored while this hub owns the arm."""
-        if self.arm is None:
-            self._update(joints, torque, source)
-
     def state(self) -> dict:
         s = self._latest
         stale = None if s is None else round(self.clock() - s["t"], 2)
-        remote_live = s is not None and s["source"] == "remote" and stale <= self.stale_after_s
         return {
-            "connected": self.connected or remote_live,
-            "source": self.source if self.connected else ("remote" if remote_live else None),
-            "torque": self.torque if self.connected else (s["torque"] if remote_live else None),
-            "mode": self.mode if self.connected else ("packing" if remote_live else "idle"),
+            "connected": self.connected,
+            "source": self.source if self.connected else None,
+            "torque": self.torque if self.connected else None,
+            "mode": self.mode if self.connected else "idle",
             "stale_s": stale, "error": self.error,
             "joints": s["joints"] if s else None, "frames": s["frames"] if s else None, "tip": s["tip"] if s else None,
         }

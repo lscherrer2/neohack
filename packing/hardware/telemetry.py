@@ -47,33 +47,3 @@ class TelemetryArm:
 
     def close(self, release: bool = False) -> None:
         self.arm.close(release=release)
-
-
-def http_publisher(server: str, source: str = "remote", timeout_s: float = 0.5) -> Publish:
-    """Publish to the shop server's POST /robot/telemetry (for a robot agent in its own process).
-    Non-blocking: a background thread sends only the latest value, so a slow server can't stall Motion."""
-    import threading
-
-    import httpx
-
-    client = httpx.Client(base_url=server.rstrip("/"), timeout=timeout_s)
-    latest: dict = {}
-    wake = threading.Event()
-
-    def sender() -> None:
-        while True:
-            wake.wait()
-            wake.clear()
-            body = latest.get("body")
-            try:
-                client.post("/robot/telemetry", json=body)
-            except httpx.HTTPError as e:
-                log.debug("telemetry post failed: %s", e)
-
-    threading.Thread(target=sender, name="telemetry", daemon=True).start()
-
-    def publish(joints: dict[str, float], torque: bool) -> None:
-        latest["body"] = {"joints": joints, "torque": torque, "source": source}
-        wake.set()
-
-    return publish

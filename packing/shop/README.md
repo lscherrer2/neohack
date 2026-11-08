@@ -9,9 +9,10 @@ python -m packing.shop chat             # optional: same ordering agent in the t
 Dashboard: http://localhost:8000/dashboard/. Only one server can use port 8000: stop any other
 `serve`/`start` (Ctrl+C) before starting a new one.
 
-Running the pieces separately (e.g. robot agent on another machine) still works:
-`python -m packing.shop serve` + `python -m packing.shop robot [--server URL]` (the robot process then posts
-its arm position to the server so the 3D view stays live). `serve --robot` makes the server own the real arm.
+Running the pieces separately still works for simulated packing:
+`python -m packing.shop serve` + `python -m packing.shop robot [--server URL]`. `serve` owns a simulated arm, `serve --robot` the
+real one. Real packing (`TrayPacker`) needs the server's arm, so it runs only in `start --robot`;
+a separate `robot --robot` process is gone (it exits with a hint).
 
 ```
 chat (Claude Haiku) ──MCP──▶ order server ◀──HTTP── robot agent ──USB──▶ arm

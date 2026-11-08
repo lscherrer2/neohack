@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, the order of work, and the current checklist under "Next steps": one order procedure on `TrayPacker`; the old `Cell` path is being deleted).
+**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, the order of work, and the current checklist under "Next steps": one order procedure on `TrayPacker`; the old `Cell` path is deleted).
 
 Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight over the Feetech servo SDK —
 **no LeRobot** (removed Nov 2026; our driver keeps LeRobot's units and calibration format). The project is
-`packing/`: a teach-and-repeat cell that moves boxes, packs parts from a calibrated parts tray (DXF layout), and
+`packing/`: a cell that moves boxes, packs parts from a calibrated parts tray (DXF layout), and
 tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orders, live 3D arm, tray calibration) on top.
 
 ## Environment
@@ -76,7 +76,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
     paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view) · `program.py` motion programs:
     `joint_offsets.py` joint zero offsets fitted from desk touches · `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
     → validated steps → `run(steps, motion)`
-  - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
+  - `cell/` `inventory.py` SQLite parts inventory (tray pockets + event log; no boxes — those are in the orders DB)
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
     (servo calibration) · `tray_calibrate.py` hand-guided tray calibration (CLI)
   - `boxes/` packing boxes: `geometry.py` (box.step, capture math, footprints) · `store.py` (orders DB) ·
@@ -84,10 +84,10 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type + plate
     corner points · `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard
     calibration, corners/pockets mode) · `goto.py` go-to preview planner · `pick.py` pick planner (`AxisIK`)
-  - `hardware/telemetry.py` `TelemetryArm` (publishes joints on read, throttled; `http_publisher` non-blocking)
+  - `hardware/telemetry.py` `TelemetryArm` (publishes joints on read, throttled; the hub wraps lent arms with it)
   - `service/` first, Vapi-first order service (webhook + callbacks; `packing/service/README.md`,
     `VAPI_SETUP.md`). **Parked** — kept as reference; `shop/` reuses its `orders.py` (OrderStore),
-    `vapi.py` (Catalog, parse_items) and `worker.py` (RobotPacker).
+    `vapi.py` (Catalog, parse_items); `worker.py` keeps `Worker` + `SimPacker` (no real-arm packer: that's `TrayPacker`).
   - `shop/` **current** order stack (see "Shop" below and `packing/shop/README.md`)
   - Config `packing/cell.yaml`; data in `packing/data/` (`poses.json`, `inventory.db`, `tray_cal.json`;
     `--sim` uses `sim_*`).
@@ -100,17 +100,16 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   the **user** runs `python camera/cam_server.py`, then fetch frames from `http://127.0.0.1:8765/snap.jpg`
   (check `/info` first). Opens only the "icspring camera" by name — never other cameras.
 - `part.dxf` = parts tray layout (mm); `box.step` = packing box with grab tab (STEP, units m; box handling is TODO).
-- CLI: `python -m packing [--sim] <check|teach|teach-all|goto [--line]|where|home|release|demo|tune|restock|tray|tray-calibrate|status|events|set-part|set-box|clear-output|pack|move-box>`
-  (`--sim` goes **before** the command).
+- CLI: `python -m packing [--sim] <teach|poses|goto [--line]|where|home|release|demo|tune|restock|tray|tray-calibrate|status|events|set-part>`
+  (`--sim` goes **before** the command). Orders are packed only by the shop (`start --robot` → `TrayPacker`).
 
 ## Parts tray — plan `.claude/plans/tray_layout.md`
 - `tray:` in `cell.yaml`: DXF path, item types (feature circle/rect/pin_pair + size mm, `grip_axis`, name),
   `reference_points`, protrusion 10 mm, extract ≥120 mm (glue stick length). 33 pockets: `aa_1..7`, `9v_1..5`,
   `piezo_1..8` (pick point = midpoint of the pin pair), `glue_1..8`, `breadboard_1..5`; `_1` = row nearest the arm.
 - Tray frame = DXF x/y, z out of the face; DXF x runs left→right as seen from the arm. Grip: fingers close along
-  tray x for all but the breadboard (tray y). Catalog names come from the tray types; `part_slots` is empty;
-  up to `max_items_per_order` (10) items per order, any mix; items cycle through the `box_slots` drop spots
-  (one spot today: item i → `box_slots[i % len]`). `cfg.stock_slots` = part_slots + tray pockets.
+  tray x for all but the breadboard (tray y). Catalog names come from the tray types;
+  up to `max_items_per_order` (10) items per order, any mix. `cfg.stock_slots` = the tray pockets.
 - Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
   points → scipy rigid fit, refused above 3 mm RMS. `tray.calibration_mode`: **corners** (default; the middle of each
   rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
@@ -135,8 +134,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `min_grip`). A level tool can't pull 12 cm (pull heads at the base): the planner pitches the tool down 0..40° and
   uses the smallest pitch that fits. Reports `pull_twist_deg` (5-DOF yaw change) and `jaw_off_deg` (breadboard
   jaws tilt with the pitch, up to ~40°). Jaw tips stick out ~6 mm past the tool point (open question:
-  fingertip tool point + recalibration, see the plan). **No inventory change** (test); drop spot TBD; `Cell` doesn't pick from
-  pockets yet. Not yet run on the real arm.
+  fingertip tool point + recalibration, see the plan). **No inventory change** (test); orders pick through
+  `boxes/pack.py` / `TrayPacker`. Not yet run on the real arm.
 
 ## Shop (current ordering stack) — `packing/shop/`, plan `.claude/plans/shop_slim.md`
 - `python -m packing.shop start [--robot] [--auto]` = one process: FastAPI server on :8000 + MCP tools
@@ -179,10 +178,21 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   it, AND the arm: shoulder→jaw points ≥ 1.5 cm; no dip; box tilt ≤ 30°),
   straight down to exactly the picked height (box tilt ≤ 5°), release, back out level. Tilts are measured on the
   box. Order (Action, `start --robot` → `TrayPacker`): box → pack spot (355, 0) mm (works for grips 8–20 mm from the wall;
-  345 failed deeper grips, 365+ the drops), each reserved part picked + dropped (centered over the opening, jaws above the
-  rim, end above the floor; no wall check), box → its supply spot mirrored right. Tray goes on the LEFT.
+  345 fails the box move; 365 and 355 ± 50 y also plan everything), each reserved part picked + released, box → its supply
+  spot mirrored right. Tray goes on the LEFT. **Side release** (`pack.plan_drop`): the wrist rolls during the free move
+  so the jaws close HORIZONTALLY (tool x level, nothing under the part when they open); tool pointing away from the
+  swivel, level (parts longer than the 76 mm opening, e.g. glue: pitched just enough to fit, ~65°, end first); part
+  center (tool point + length/2, beside the fixed jaw) over the box center; jaws + whole part ≥ `RIM_CLEAR_MM` above
+  the rim; way in / release / retreat checked clear of the box. From 380 mm out glue only fits level (would bridge the rim).
+  **One-way boxes**: supply → pack → output only (box-move `to` = pack|output; no reset); new boxes only via "Add box";
+  a packed box at output = obstacle until **Picked up** (Calibration → Packing boxes; `DELETE /api/boxes/{id}`). An
+  `in_use` box can be removed unless its order is `packing`. Demo quality: no resume/retries. Each part is marked
+  used as soon as it's out of its pocket (live tray map; event "item i/n: sku from pocket → box"). Gripper closes on
+  nothing → pocket marked empty (reservation moves/goes short), order `failed`, agent stops. Refused before moving
+  (no free box, another box at the pack spot, unplannable: `NotStarted`) → box given back, order back to `queued`
+  (`POST /robot/orders/{id}/requeue`), agent keeps going (30 s back-off).
   `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
-  Orders → Check). Part `length_mm` per tray type = estimates (drop height).
+  Orders → Check). Part `length_mm` per tray type = estimates (release point).
 - **Desk plane** (handoff doc `.claude/plans/FLOOR_CALIBRATION.md`; `packing/boxes/desk.py`, Calibration tab → Desk): motors off, touch the closed jaw tip to the desk at
   3+ spots far apart → least-squares plane (refused if < 3 points, bunched/collinear, or RMS > 3 mm), saved to
   `data/desk_cal.json` (`desk.calibration_file`; sim: `sim_desk_cal.json`). Box spots away from the calibrated one
@@ -219,13 +229,13 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   (`hub.gravity`, real arm only): go-to `Motion`s use it, and holds (motors back on, Stop) command
   `hub.hold_target(pose)` = pose + gravity offset so the arm doesn't sag. New arm users must do the same:
   `arm.tune(...)` + `Motion(..., gravity=gravity_feedforward(...))` on the real arm.
-  In-process packing borrows it (`RobotPacker(arm_provider=hub.borrow)`); `shop/goto_runner.py` borrows it for
-  go-to moves; a separate `robot --robot` process opens its own arm and posts `/robot/telemetry`. Torque off only
+  Packing (`TrayPacker`, only in `start --robot`) and `shop/goto_runner.py` (go-to moves) use the hub's arm; a
+  separate `robot --robot` process is gone (exits with a hint; `robot` = sim packer only). Torque off only
   after a `confirm_hold` from the UI, motion only after `confirm_move`; `/robot/claim` hands out nothing while
   calibrating. Restarting the server drops an unsaved calibration session (points live in memory) and leaves the
   torque as it was (off if calibrating) until Connect.
 - Robot agent polls `POST /robot/claim` (returns the in-progress order first → resume), reports
-  `done`/`failed`, and **exits on a packing failure** (human checks arm).
+  `done`/`failed`/`requeue`, and **exits on a packing failure** (human checks arm; not on a refusal before moving).
 - Dashboard = React app (`packing/shop/web/`, served from `static/app/` at `/dashboard/`; old
   `static/dashboard.html` is only a fallback if the build is missing). Tabs: **Orders** (status plate, chat,
   stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via
@@ -253,8 +263,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
 ## Conventions
-- Every location `L` = poses `L.above` + `L.at`; between stations go via `travel_pose` (`home`).
-- Inventory is committed before and after each physical step; `in_gripper` items block runs until resolved.
+- Positions come from calibration (tray, boxes, desk), not taught poses; taught poses are only for `home` / demos.
 - SO-101 has 5 body DOF: IK targets must not fix tool yaw (it's tied to `shoulder_pan`). `ArmModel`
   splits R = Rz(azimuth) @ local and only holds/interpolates the local part — keep it that way.
 - Joint moves = curved tip path; `{line: X}` / `goto --line` = straight tip path via IK, fully planned

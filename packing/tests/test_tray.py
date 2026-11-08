@@ -250,7 +250,6 @@ class PocketInventoryTests(unittest.TestCase):
         self.assertEqual(cfg.catalog["glue"], "glue stick")
         self.assertEqual(len(cfg.stock_slots), 33)
         self.assertEqual(cfg.stock_slots["piezo_8"], "piezo")
-        self.assertNotIn("aa_1.above", cfg.required_poses())  # pockets are computed, not taught
 
 
 class TrayApiTests(unittest.TestCase):

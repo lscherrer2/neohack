@@ -1,4 +1,4 @@
-"""Real stock, from the packing cell's inventory database (packing/data/inventory.db).
+"""Real stock (tray pockets), from the packing cell's inventory database (packing/data/inventory.db).
 
 Opens the database per call: SQLite connections belong to the thread that made them, and the server,
 the dashboard and the robot agent thread all read stock.
@@ -16,7 +16,7 @@ from ..service.orders import Order
 class Shelf:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.path, self.box_supply = cfg.inventory_db, cfg.box_supply
+        self.path = cfg.inventory_db
 
     @property
     def slots(self) -> dict[str, str]:
@@ -32,9 +32,9 @@ class Shelf:
             out[p.sku] = out.get(p.sku, 0) + 1
         return out
 
-    def restock(self) -> tuple[int, int]:
-        """After refilling by hand: one part in every empty part slot, one box on every empty supply spot."""
-        return self._inv().restock(self.slots, self.box_supply)
+    def restock(self) -> int:
+        """After refilling by hand: one part in every empty part slot. Returns how many were added."""
+        return self._inv().restock(self.slots)
 
     def full_slots(self) -> set[str]:
         return self._inv().full_slots() & set(self.slots)
@@ -67,7 +67,7 @@ class Shelf:
                    if sku in (None, s) and (only is None or loc in only))
 
     def consume(self, skus: list[str]) -> None:
-        """Mark one available part per SKU as used (simulated packing; the real cell does this itself)."""
+        """Mark one available part per SKU as used (simulated packing of orders without reservations)."""
         inv = self._inv()
         for sku in skus:
             part = next((p for p in inv.parts("available") if p.sku == sku), None)

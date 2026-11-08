@@ -70,12 +70,14 @@ export default function BoxesBox({ arm, boxes, apply }: {
                     {b.desk_mm?.pack != null && b.desk_mm.output != null &&
                       ` · desk: pack spot ${signed(b.desk_mm.pack)}, output ${signed(b.desk_mm.output)} mm`}</td>
                   <td className="btns">
-                    {(b.location !== "supply" || b.state !== "available") && b.state !== "in_use" && (
-                      <button className="act" disabled={busy !== null} title="Someone put it back, empty, at its left spot"
-                              onClick={() => act(`reset:${b.id}`, "POST", `/api/boxes/${b.id}/reset`)}>Reset</button>
+                    {b.state === "packed" ? (
+                      <button className="act" disabled={busy !== null} title="The customer took it: forget this box"
+                              onClick={() => act(`del:${b.id}`, "DELETE", `/api/boxes/${b.id}`)}>Picked up</button>
+                    ) : (
+                      <button className="del" disabled={busy !== null}
+                              title={b.state === "in_use" ? "Only if its order isn't being packed" : undefined}
+                              onClick={() => setConfirmRemove(b.id)}>Remove</button>
                     )}
-                    <button className="del" disabled={busy !== null || b.state === "in_use"}
-                            onClick={() => setConfirmRemove(b.id)}>Remove</button>
                   </td>
                 </tr>
               ))}

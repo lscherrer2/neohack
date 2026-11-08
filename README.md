@@ -23,9 +23,9 @@ python -m packing.tools.calibrate range 60  # move every joint end to end during
 ## Use
 ```bash
 python -m packing where            # joint values + tip position
-python -m packing teach-all        # teach the cell's poses with the keyboard
-python -m packing pack             # package boxes
-python -m packing.shop start --robot   # order server + dashboard on the real arm (http://localhost:8000/dashboard/)
+python -m packing teach home       # teach a pose with the keyboard
+python -m packing.shop start --robot   # order server + dashboard on the real arm, packs orders (TrayPacker)
+                                       #   (http://localhost:8000/dashboard/)
                                        #   Orders tab + Calibration tab (live 3D arm, tray calibration, go-to preview)
 python -m packing tray-calibrate   # tray calibration from the terminal (motors off, touch the 4 plate corners)
 python -m packing.remote           # MCP server for LLM control
