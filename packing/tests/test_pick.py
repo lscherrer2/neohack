@@ -21,7 +21,8 @@ from packing.shop.goto_runner import GotoRunner
 from packing.shop.server import create_server
 from packing.shop.shelf import Shelf
 from packing.tests.test_arm_view import MODEL
-from packing.tests.test_tray import CalibrationTests, temp_config, tilted_pose
+from packing.tests import test_tray
+from packing.tests.test_tray import temp_config, tilted_pose
 from packing.tray.calibration import calibrate
 from packing.tray.pick import plan_pocket_pick
 
@@ -31,7 +32,7 @@ HOME = dict.fromkeys(["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex
 def real_like_cal(cfg):
     """A tray like the real cell (2026-11-07): face nearly vertical, facing the arm, ~33 cm out. Saved."""
     R, t = tilted_pose(86, 0.33)
-    cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in CalibrationTests.REFS])
+    cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in test_tray.CalibrationTests.REFS])
     cal.save(cfg.tray.calibration_file)
     return cal
 
@@ -149,7 +150,7 @@ class PickPlanTests(unittest.TestCase):
         (Path(self._tmp.name) / "far").mkdir(exist_ok=True)
         far = load_config(temp_config(Path(self._tmp.name) / "far"))
         R, t = tilted_pose(86, 0.60)  # 60 cm out: beyond reach
-        cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in CalibrationTests.REFS])
+        cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in test_tray.CalibrationTests.REFS])
         with self.assertRaises(PathError):
             plan_pocket_pick(MODEL, far.tray, far.gripper, cal, "aa_4", HOME)
 

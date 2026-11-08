@@ -75,6 +75,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
     (servo calibration) · `tray_calibrate.py` hand-guided tray calibration (CLI)
+  - `boxes/` packing boxes: `geometry.py` (box.step, capture math, footprints) · `store.py` (orders DB) ·
+    `move.py` (box moves) · `pack.py` (whole-order program) · `packer.py` (`TrayPacker`, runs it on the hub's arm)
   - `tray/` parts tray: `dxf.py` ezdxf reader (circles + closed rect loops) · `layout.py` pockets by type + plate
     corner points · `calibration.py` tray→robot rigid fit + checks · `session.py` `CalibrationSession` (dashboard
     calibration, corners/pockets mode) · `goto.py` go-to preview planner · `pick.py` pick planner (`AxisIK`)
@@ -152,6 +154,15 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   Pocket marked empty → reservation moves to another free unit or the item goes short (`slot` NULL); marked full /
   restock → `fill_short`. **Locked**: units of a `packing` order can't be changed from the dashboard (409; bulk fill
   skips them). Tray API: `reserved_by`, `locked`; orders carry `slots`. Sim packing consumes exactly those units.
+- **Boxes + full order packing** (plan `.claude/plans/boxes_and_reservations.md`, code `packing/boxes/`, sim-tested,
+  not run on hardware): supply boxes on the LEFT, tab facing the swivel; calibrate = motors off, jaws closed on the
+  tab (gripper down) → Calibration tab "Add box". Order (Action, `start --robot` → `TrayPacker`): box → pack spot
+  (260, 0) mm, each reserved part picked + dropped in, box → its supply spot mirrored to the right. Box moves lift
+  straight up 30 mm (wrist limit: straight-down only ~10 cm up near the base), carry in joint space (checked: no
+  dip, level, no overlap with boxes/tray), set down at exactly the picked height. Tray is being moved to the LEFT
+  (straight ahead its pull-outs crossed the pack spot). `GET /api/boxes`, `POST /api/boxes/capture`,
+  `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run, Orders → Check). Part `length_mm` per tray
+  type = estimates (drop height).
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.

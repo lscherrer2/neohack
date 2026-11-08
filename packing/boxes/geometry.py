@@ -110,3 +110,16 @@ def mirror(T_box: np.ndarray, pan_xy: np.ndarray) -> np.ndarray:
     """The same spot mirrored to the other side of the arm's forward line (y -> -y), tab facing the swivel."""
     c = T_box[:3, 3]
     return box_frame((c[0], 2 * pan_xy[1] - c[1]), c[2], pan_xy)
+
+
+def obstacles(cfg, box_poses: dict[int, np.ndarray], skip: int | None = None) -> list[tuple[str, np.ndarray]]:
+    """Table-plane footprints of the other boxes (at their current spots) and of the calibrated parts tray."""
+    out = [(f"box {bid}", footprint(T, margin=0.005)) for bid, T in box_poses.items() if bid != skip]
+    tray = getattr(cfg, "tray", None)
+    cal = tray.calibration() if tray else None
+    if cal:
+        o = tray.layout().outline
+        corners = [cal.to_robot(x, y)[:2] for x, y in ((o["xmin"], o["ymin"]), (o["xmax"], o["ymin"]),
+                                                        (o["xmax"], o["ymax"]), (o["xmin"], o["ymax"]))]
+        out.append(("the parts tray", np.array(corners)))
+    return out

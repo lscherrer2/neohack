@@ -59,11 +59,16 @@ def make_hub(args, cfg, own_arm: bool):
     return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)
 
 
-def make_packer(args, shelf, hub=None):
+def make_packer(args, shelf, hub=None, store=None, events=None):
     if args.robot:
         from ..service.worker import RobotPacker
 
-        if hub is not None:  # same process as the server: borrow the hub's arm
+        if hub is not None and store is not None:  # same process as the server: boxes + tray on the hub's arm
+            from ..boxes.packer import TrayPacker
+            from ..boxes.store import BoxStore
+
+            return TrayPacker(hub, shelf.cfg, BoxStore(store), shelf, events.record if events else lambda *a, **k: None)
+        if hub is not None:
             return RobotPacker(args.config, arm_provider=hub.borrow)
         from ..hardware.telemetry import http_publisher
 
@@ -110,13 +115,16 @@ def main() -> None:
 
         from .server import create_server
 
+        from .events import EventLog
+
         catalog, store, shelf = load(args)
+        events = EventLog()
         hub = make_hub(args, shelf.cfg, own_arm=args.cmd == "start" or args.robot)
         if args.cmd == "start":  # robot agent as a background thread talking to this same server
             from .robot_agent import run
 
             url = f"http://127.0.0.1:{args.port}"
-            threading.Thread(target=run, args=(url, make_packer(args, shelf, hub)), name="robot-agent",
+            threading.Thread(target=run, args=(url, make_packer(args, shelf, hub, store, events)), name="robot-agent",
                              daemon=True).start()
         import os
 
@@ -125,7 +133,7 @@ def main() -> None:
         print(f"Remote-agent MCP: http://{args.host}:{args.port}/agent/mcp "
               f"(auth: {'bearer token' if token else 'NONE, open'}; hosts: {', '.join(args.allow_host or ['any'])})")
         try:
-            uvicorn.run(create_server(store, catalog, auto_dispatch=args.auto, shelf=shelf, hub=hub,
+            uvicorn.run(create_server(store, catalog, events=events, auto_dispatch=args.auto, shelf=shelf, hub=hub,
                                       agent_token=token, agent_hosts=args.allow_host),
                         host=args.host, port=args.port, timeout_graceful_shutdown=2)
         finally:

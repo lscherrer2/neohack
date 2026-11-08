@@ -140,6 +140,7 @@ pre { margin: 0; padding: 8px 10px; background: var(--panel); border-radius: 3px
 .traymap .res-ring { fill: none; stroke: var(--ink); stroke-width: .9; }
 .traymap .pocket.locked { cursor: not-allowed; }
 .traymap .pocket.locked .res-ring { stroke: var(--safety); stroke-width: 1.4; }
+.check-btn { margin-right: 10px; }
 .slots { font-size: .8rem; margin-top: 2px; }
 .slots.short { color: var(--alarm); font-weight: 600; }
 .traymap .res-tag { font: 700 5px var(--text); fill: var(--ink); pointer-events: none; }
@@ -163,6 +164,9 @@ pre { margin: 0; padding: 8px 10px; background: var(--panel); border-radius: 3px
 .dot-off { background: var(--alarm); }
 .scene-label { font: 600 .78rem var(--text); white-space: nowrap; pointer-events: none; user-select: none;
                padding: 2px 7px; border-radius: 3px; }
+.box-label { color: #fff; background: var(--steel); }
+.box-label.box-in_use { background: var(--safety); color: var(--ink); }
+.box-label.box-packed { background: var(--ok); }
 .target-label { background: var(--safety); color: var(--ink); }
 .ghost-label { background: var(--ink); color: #fff; font: 600 .95rem var(--sign); padding: 4px 10px; }
 .point-label { background: rgba(255,255,255,.85); color: var(--ok); font-size: .7rem; padding: 0 4px; }

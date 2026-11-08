@@ -164,3 +164,20 @@ export interface CalSession {
   fit: CalFit | null;
   saved: { created: string; rms_mm: number } | null;
 }
+
+// ---------- packing boxes (GET /api/boxes)
+export interface BoxInfo {
+  id: number;
+  state: "available" | "in_use" | "packed";
+  location: "supply" | "pack" | "output";
+  order_id: number | null;
+  pose?: Mat4; // box frame at its current location: origin bottom center, z up, tab along -y (robot frame, m)
+  report: { tilt_deg?: number; bottom_mm?: number };
+  created_at: string;
+}
+
+export interface BoxesState {
+  boxes: BoxInfo[];
+  pack_spot_mm: [number, number];
+  geometry: { w_m: number; h_m: number; tab_w_m: number; tab_out_m: number };
+}

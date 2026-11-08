@@ -3,7 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useMemo, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import { itemColor } from "../api";
-import type { ArmState, CalSession, Mat4, Pocket, TrayState, Vec3 } from "../types";
+import type { ArmState, BoxesState, BoxInfo, CalSession, Mat4, Pocket, TrayState, Vec3 } from "../types";
 
 // Robot base frame: x forward, y left, z up, meters. three.js is y-up, so everything robot-side lives
 // in <RobotFrame>, rotated -90° about x: robot (x, y, z) -> three (x, z, -y).
@@ -229,6 +229,50 @@ type Label = { key: string; text: string; cls: string; pos: THREE.Vector3 };
 
 /** robot base frame (meters) -> three.js world (the -90° about x of the scene root). */
 const robotToWorld = (p: number[]) => new THREE.Vector3(p[0], p[2], -p[1]);
+// ---------------------------------------------------------------- packing boxes
+const BOX_COLOR: Record<BoxInfo["state"], string> = { available: C.steel, in_use: C.safety, packed: C.ok };
+
+/** Open-top box + its tab, in the box frame (origin bottom center, z up, tab along -y). */
+function BoxMesh({ box, g }: { box: BoxInfo; g: BoxesState["geometry"] }) {
+  const m = useMemo(() => toMatrix(box.pose!), [box.pose]);
+  const color = BOX_COLOR[box.state] ?? C.ghost;
+  const { w_m: w, h_m: h, tab_w_m: tw, tab_out_m: to } = g;
+  const edges = useMemo(() => new THREE.EdgesGeometry(new THREE.BoxGeometry(w, w, h)), [w, h]);
+  return (
+    <group matrix={m} matrixAutoUpdate={false}>
+      <group position={[0, 0, h / 2]}>
+        <mesh>
+          <boxGeometry args={[w, w, h]} />
+          <meshStandardMaterial color={color} transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+        <lineSegments geometry={edges}>
+          <lineBasicMaterial color={color} />
+        </lineSegments>
+      </group>
+      {/* tab: plate along the top edge + rib below it */}
+      <mesh position={[0, -(w / 2 + to / 2), h - 0.001]}>
+        <boxGeometry args={[tw, to, 0.002]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      <mesh position={[0, -(w / 2 + to * 0.4), h - 0.019]}>
+        <boxGeometry args={[0.002, to * 0.65, 0.036]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    </group>
+  );
+}
+
+/** Dashed outline on the table where orders are packed (tab facing the swivel). */
+function PackSpot({ xy, g }: { xy: [number, number]; g: BoxesState["geometry"] }) {
+  const [x, y] = [xy[0] / 1000, xy[1] / 1000];
+  const a = Math.atan2(y - PAN_AXIS[1], x - PAN_AXIS[0]); // box +y = radially outward
+  const h = g.w_m / 2;
+  const ux = [Math.cos(a), Math.sin(a)], vx = [Math.sin(a), -Math.cos(a)]; // +y (out), +x
+  const pt = (sx: number, sy: number): Vec3 => [x + vx[0] * sx + ux[0] * sy, y + vx[1] * sx + ux[1] * sy, 0.001];
+  return <Line points={[pt(-h, -h), pt(h, -h), pt(h, h), pt(-h, h), pt(-h, -h)]} color={C.ink} lineWidth={1.5} dashed
+               dashSize={0.008} gapSize={0.006} />;
+}
+
 /** tray frame point (mm) -> three.js world, through the tray -> robot matrix (meters). */
 function trayToWorld(m: Mat4, xmm: number, ymm: number, zmm: number) {
   const v = [xmm / 1000, ymm / 1000, zmm / 1000, 1];
@@ -251,8 +295,9 @@ function LabelProjector({ labels, els }: { labels: Label[]; els: RefObject<Map<s
   return null;
 }
 
-export default function Scene({ arm, stale, tray, session, highlighted }: {
+export default function Scene({ arm, stale, tray, session, highlighted, boxes = null }: {
   arm: ArmState | null; stale: boolean; tray: TrayState | null; session: CalSession | null; highlighted: string | null;
+  boxes?: BoxesState | null;
 }) {
   const fitMatrix = session?.active && session.fit?.matrix ? session.fit.matrix : null;
   const trayMatrix = tray ? tray.calibration?.matrix ?? defaultTrayMatrix(tray.outline) : null;
@@ -268,6 +313,14 @@ export default function Scene({ arm, stale, tray, session, highlighted }: {
     if (hp) labels.push({ key: "target", text: hp.id, cls: "target-label",
                           pos: trayToWorld(trayMatrix, hp.x, hp.y, tray.protrusion_mm + 10) });
   }
+  for (const b of boxes?.boxes ?? []) {
+    if (!b.pose) continue;
+    const word = b.state === "in_use" ? `order ${b.order_id}` : b.state;
+    labels.push({ key: `box:${b.id}`, text: `Box ${b.id} · ${word}`, cls: `box-label box-${b.state}`,
+                  pos: robotToWorld([b.pose[0][3], b.pose[1][3], b.pose[2][3] + (boxes!.geometry.h_m + 0.02)]) });
+  }
+  if (boxes) labels.push({ key: "packspot", text: "pack spot", cls: "point-label",
+                           pos: robotToWorld([boxes.pack_spot_mm[0] / 1000, boxes.pack_spot_mm[1] / 1000, 0.01]) });
   for (const pt of session?.points ?? [])
     labels.push({ key: `pt:${pt.pocket}`, text: pt.pocket, cls: "point-label",
                   pos: robotToWorld([pt.robot_m[0], pt.robot_m[1], pt.robot_m[2] + 0.014]) });
@@ -288,6 +341,8 @@ export default function Scene({ arm, stale, tray, session, highlighted }: {
           <Tray tray={tray} highlighted={highlighted} matrix={trayMatrix!} ghost={!tray.calibration} />
         )}
         {tray && fitMatrix && <FitOutline tray={tray} matrix={fitMatrix} />}
+        {boxes && <PackSpot xy={boxes.pack_spot_mm} g={boxes.geometry} />}
+        {boxes?.boxes.filter((b) => b.pose).map((b) => <BoxMesh key={b.id} box={b} g={boxes.geometry} />)}
         {session?.points.map((pt) => (
           <group key={pt.pocket} position={pt.robot_m}>
             <mesh>

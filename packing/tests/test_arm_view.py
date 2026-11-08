@@ -20,7 +20,8 @@ from packing.service.vapi import Catalog
 from packing.shop.arm_hub import ArmBusy, ArmHub
 from packing.shop.server import create_server
 from packing.shop.shelf import Shelf
-from packing.tests.test_tray import CalibrationTests, temp_config, tilted_pose
+from packing.tests import test_tray
+from packing.tests.test_tray import temp_config, tilted_pose
 from packing.tray.session import CalibrationSession, corner_label
 
 MODEL = ArmModel(load_ranges("my_awesome_follower_arm"))
@@ -178,7 +179,7 @@ class SessionTests(unittest.TestCase):
             sess.set_mode("pockets")
             self.assertIsNone(sess.to_dict()["fit"])
             R, t = tilted_pose()
-            for pid, xy in CalibrationTests.REFS[:3]:
+            for pid, xy in test_tray.CalibrationTests.REFS[:3]:
                 sess.capture(pid, R @ (np.array([*xy, 0]) * 0.001) + t)
             d3 = sess.to_dict()
             self.assertTrue(d3["fit"]["ok"])
@@ -311,7 +312,7 @@ class GotoTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.cfg = load_config(temp_config(Path(self._tmp.name)))
         R, t = tilted_pose(40, 0.22)
-        self.cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in CalibrationTests.REFS])
+        self.cal = calibrate([(p, xy, R @ (np.array([*xy, 0]) * 0.001) + t) for p, xy in test_tray.CalibrationTests.REFS])
         self.cal.save(self.cfg.tray.calibration_file)
         self.arm = FakeArm(gain=0.9)
         self.hub = ArmHub(lambda: self.arm, "sim", lambda: MODEL, poll_s=0.01)

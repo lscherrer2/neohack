@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { ArmState, CalSession, TrayState } from "../types";
 import type { Avail } from "./CalibrationTab";
 import ConfirmDialog from "./ConfirmDialog";
@@ -17,6 +17,7 @@ interface Props {
   busy: string | null;
   error: string | null;
   clearError: () => void;
+  children?: ReactNode; // extra sections below the tray calibration (packing boxes)
 }
 
 const fmt = (v: number | null | undefined, digits = 1, unit = "") => (v == null ? "—" : `${v.toFixed(digits)}${unit}`);
@@ -241,6 +242,8 @@ export default function Panel(p: Props) {
           </div>
         )}
       </section>
+
+      {p.children}
 
       {confirm === "start" && (
         <ConfirmDialog title="Start calibration?" body="Hold the arm — motors will turn OFF and it will drop."

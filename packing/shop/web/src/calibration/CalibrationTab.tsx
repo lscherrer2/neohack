@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { api, ApiError, errText, usePoll } from "../api";
 import type { TrayLoad } from "../App";
 import { type Avail, liveStatus, useArmLive } from "../arm/useArmLive";
+import { useBoxes } from "../arm/useBoxes";
+import BoxesBox from "./BoxesBox";
 import type { ArmState, CalSession } from "../types";
 import Panel from "./Panel";
 import Scene from "./Scene";
@@ -10,6 +12,7 @@ export type { Avail };
 
 export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
   const { arm, stale, stream, applyArm } = useArmLive();
+  const { boxes, apply: applyBoxes } = useBoxes();
 
   // ---- calibration session
   const [cal, setCal] = useState<Avail<CalSession>>({ data: null, unavailable: null });
@@ -56,12 +59,15 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
   return (
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
-        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={cal.data} highlighted={highlighted} />
+        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={cal.data} highlighted={highlighted}
+               boxes={boxes} />
         <div className="scene-status"><span className={`dot ${status.dot}`} />{status.text}</div>
       </section>
       <Panel arm={arm} stale={stale} cal={cal} tray={trayLoad.tray} trayMissing={trayLoad.missing}
              target={target} setTarget={setTarget} highlighted={highlighted}
-             run={run} busy={busy} error={error} clearError={() => setError(null)} />
+             run={run} busy={busy} error={error} clearError={() => setError(null)}>
+        <BoxesBox arm={arm.data} boxes={boxes} apply={applyBoxes} />
+      </Panel>
     </main>
   );
 }

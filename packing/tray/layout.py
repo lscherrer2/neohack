@@ -34,6 +34,7 @@ class TrayType:
     grip_axis: str = "x"  # tray-frame axis the gripper fingers close along (before pocket yaw)
     min_grip: float | None = None  # gripper units; closing tighter = missed/dropped (None = gripper.min_part_width)
     grip_mm: float | None = None  # part width between the jaws; None = from the feature (circle Ø / rect side)
+    length_mm: float = 60.0  # how far the part sticks out past the jaws once picked (drop height into a box)
 
     def __post_init__(self) -> None:
         if self.feature not in FEATURES:

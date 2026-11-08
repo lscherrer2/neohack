@@ -25,6 +25,7 @@
   POST /api/boxes/capture       motors off, jaws closed on a box tab: add that box
   DELETE /api/boxes/{id}        remove a box record;  POST /api/boxes/{id}/reset: back to available at supply
   POST /api/arm/box-move        {"box_id", "to": supply|pack|output, "confirm_move"} move a box by its tab
+  POST /api/orders/{id}/pack-plan  dry run of packing that order (box in, picks + drops, box out); nothing moves
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
@@ -32,14 +33,13 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -594,6 +594,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
     # ---------------- packing boxes (packing/boxes/)
     from ..boxes.geometry import BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, box_from_grasp, footprint, overlaps
+    from ..boxes.geometry import obstacles as box_obstacles
     from ..boxes.move import box_pose, plan_box_move
     from ..boxes.store import BoxError, BoxStore
 
@@ -616,15 +617,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
     def _obstacles(pan_xy, skip: int | None = None) -> list[tuple[str, np.ndarray]]:
         """Footprints (table plane) of the other boxes and of the parts tray."""
-        out = [(f"box {bid}", footprint(T, margin=0.005)) for bid, T in _box_poses(pan_xy).items() if bid != skip]
-        tray = getattr(_box_cfg(), "tray", None)
-        cal = tray.calibration() if tray else None
-        if cal:
-            o = tray.layout().outline
-            corners = [cal.to_robot(x, y)[:2] for x, y in ((o["xmin"], o["ymin"]), (o["xmax"], o["ymin"]),
-                                                            (o["xmax"], o["ymax"]), (o["xmin"], o["ymax"]))]
-            out.append(("the parts tray", np.array(corners)))
-        return out
+        return box_obstacles(_box_cfg(), _box_poses(pan_xy), skip)
 
     def _boxes_state() -> dict:
         h = _hub()
@@ -693,6 +686,25 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         boxes.update(box_id, location="supply", state="available", order_id=None)
         events.record("robot", f"Box {box_id} back at its supply spot (empty)", box_id=box_id)
         return _boxes_state()
+
+    @app.post("/api/orders/{order_id}/pack-plan")
+    def order_pack_plan(order_id: int):
+        """Dry run of packing this order on the arm (box in, picks + drops, box out). Nothing moves, no box is
+        assigned. 422 with the reason if it can't be planned."""
+        from ..boxes.packer import TrayPacker
+        from ..motion.kinematics import PathError
+
+        o = store.get(order_id)
+        if not o:
+            raise HTTPException(404, "no such order")
+        h = _hub()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        try:
+            plan = TrayPacker(h, _box_cfg(), boxes, shelf).plan(o, dry_run=True)
+        except (PathError, ValueError, BoxError, RuntimeError) as e:
+            raise HTTPException(422, f"can't pack order {order_id}: {e}") from e
+        return {"plan": plan.summary() | {"steps": None}, "ok": True}
 
     @app.post("/api/arm/box-move")
     def arm_box_move(body: BoxMoveIn):

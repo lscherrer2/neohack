@@ -13,6 +13,20 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
   const auto = state?.auto_dispatch ?? false;
   const [armDeleteAll, setArmDeleteAll] = useState(false); // second click within 3 s deletes
   const [deletingAll, setDeletingAll] = useState(false);
+  const [checks, setChecks] = useState<Record<number, { ok: boolean; text: string }>>({});
+
+  /** Dry run of packing this order on the arm (box in, picks + drops, box out): nothing moves. */
+  async function check(o: Order) {
+    setChecks((c) => ({ ...c, [o.id]: { ok: true, text: "Checking…" } }));
+    try {
+      const r = await api<{ plan: { box_id: number; items: { pocket: string; drop_tilt_deg: number }[] } }>(
+        "POST", `/api/orders/${o.id}/pack-plan`);
+      setChecks((c) => ({ ...c, [o.id]: { ok: true,
+        text: `OK: box ${r.plan.box_id}, ${r.plan.items.map((i) => i.pocket).join(", ")} — the arm can pack it` } }));
+    } catch (e) {
+      setChecks((c) => ({ ...c, [o.id]: { ok: false, text: errText(e) } }));
+    }
+  }
 
   useEffect(() => {
     if (!armDeleteAll) return;
@@ -81,11 +95,18 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
                           : `Reserved: ${o.slots.join(", ")}`}
                       </div>
                     )}
+                    {checks[o.id] && (
+                      <div className={`slots ${checks[o.id].ok ? "sub" : "short"}`}>{checks[o.id].text}</div>
+                    )}
                   </td>
                   <td><span className={`status ${o.status}`} title={o.error || ""}>{WORDS[o.status] || o.status}</span></td>
                   <td className="sub placed">{new Date(o.created_at).toLocaleTimeString([], { hour12: false })}</td>
                   <td className="btns">
                     {o.status === "ready" && <span className="sub">Robot picks it up next</span>}
+                    {(o.status === "queued" || o.status === "ready" || o.status === "failed") && (
+                      <button className="linkish check-btn" title="Dry run: can the arm pack this order? Nothing moves."
+                              onClick={() => check(o)}>Check</button>
+                    )}
                     {o.status === "queued" && !auto && (
                       <button className="act" disabled={busy.has(o.id)} onClick={() => act(o, "action")}>Action</button>
                     )}

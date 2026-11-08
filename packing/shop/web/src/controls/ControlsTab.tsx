@@ -2,9 +2,11 @@ import { useCallback, useState } from "react";
 import { api, ApiError, errText } from "../api";
 import type { TrayLoad } from "../App";
 import { liveStatus, useArmLive } from "../arm/useArmLive";
+import { useBoxes } from "../arm/useBoxes";
 import { ArmStatus } from "../calibration/Panel";
 import Scene from "../calibration/Scene";
 import type { ArmState } from "../types";
+import BoxMoveBox from "./BoxMoveBox";
 import MotorsBox from "./MotorsBox";
 import ProcedureBox from "./ProcedureBox";
 
@@ -14,6 +16,7 @@ import ProcedureBox from "./ProcedureBox";
  */
 export default function ControlsTab({ trayLoad }: { trayLoad: TrayLoad }) {
   const { arm, stale, stream, applyArm } = useArmLive();
+  const { boxes, reload: reloadBoxes } = useBoxes();
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +42,7 @@ export default function ControlsTab({ trayLoad }: { trayLoad: TrayLoad }) {
   return (
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
-        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={null} highlighted={highlighted} />
+        <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={null} highlighted={highlighted} boxes={boxes} />
         <div className="scene-status"><span className={`dot ${status.dot}`} />{status.text}</div>
       </section>
       <div className="panel stack">
@@ -50,6 +53,7 @@ export default function ControlsTab({ trayLoad }: { trayLoad: TrayLoad }) {
         <ArmStatus arm={arm} stale={stale} run={run} busy={busy} />
         <MotorsBox arm={arm.data} run={run} busy={busy} />
         <ProcedureBox arm={arm.data} tray={trayLoad.tray} setHighlighted={setHighlighted} />
+        <BoxMoveBox arm={arm.data} boxes={boxes} onMoved={reloadBoxes} />
       </div>
     </main>
   );

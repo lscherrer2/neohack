@@ -68,7 +68,10 @@ The system is a stack: each layer only works if the ones under it do. Status per
   - Collision awareness. Today it's only "approach from the normal, stand-off first"; nothing knows about
     neighboring items or the tray edge.
 
-### 5. Manipulation procedures 🟡 ← **next big piece**
+### 5. Manipulation procedures 🟡 ← **next: hardware runs**
+- 🟡 (2026-11-07) Boxes calibrated by tab grasp, box moves, whole-order packing program + `TrayPacker` (Action
+  packs on the real arm with `start --robot`), per-unit stock reservations — all sim-tested, plan
+  `boxes_and_reservations.md`. Needs: tray moved left + recalibrated, boxes added, Check, supervised first run.
 - 🟡 **Pick test from a pocket** planned + runnable from the dashboard (2026-11-07, `tray_pick.md`): all 33
   pockets plan on the real calibration with the tool pitched 20–40° down (a level tool can't pull 12 cm).
   Not yet run on the real arm; no inventory change yet. Original outline:

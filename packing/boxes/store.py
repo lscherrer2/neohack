@@ -95,6 +95,15 @@ class BoxStore:
             self.db.execute("DELETE FROM boxes WHERE id=?", (box_id,))
         return b
 
+    def peek(self, order_id: int) -> Box:
+        """The box `take` would give this order, without assigning it (dry runs)."""
+        r = (self.db.execute("SELECT * FROM boxes WHERE order_id=? AND state='in_use'", (order_id,)).fetchone()
+             or self.db.execute("SELECT * FROM boxes WHERE state='available' AND location='supply' ORDER BY id"
+                                " LIMIT 1").fetchone())
+        if not r:
+            raise BoxError("no empty box available — calibrate one on the Calibration tab")
+        return self._row(r)
+
     def take(self, order_id: int) -> Box:
         """The order's box: the one it already has, else the first available box."""
         with self.lock:
