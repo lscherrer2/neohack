@@ -172,11 +172,10 @@ class ShelfTests(unittest.TestCase):
         from packing.shop.shelf import Shelf, ShelfSimPacker
 
         tmp = tempfile.TemporaryDirectory()
-        cfg = NS(inventory_db=Path(tmp.name) / "inv.db", stock_slots={"a1": "A", "a2": "A", "b1": "B"},
-                 box_supply=["in1"])
+        cfg = NS(inventory_db=Path(tmp.name) / "inv.db", stock_slots={"a1": "A", "a2": "A", "b1": "B"})
         shelf = Shelf(cfg)
         self.assertEqual(shelf.available(), {})
-        self.assertEqual(shelf.restock(), (3, 1))
+        self.assertEqual(shelf.restock(), 3)
         self.assertEqual(shelf.available(), {"A": 2, "B": 1})
         store = OrderStore(":memory:")
         catalog = Catalog({"A": "widget", "B": "gadget"}, 2, available=shelf.available)
@@ -187,5 +186,5 @@ class ShelfTests(unittest.TestCase):
         self.assertEqual(shelf.available(), {"A": 1})
         stock = {p["sku"]: p for p in http.get("/api/state").json()["stock"]}
         self.assertEqual((stock["A"]["on_shelf"], stock["B"]["on_shelf"]), (1, 0))
-        self.assertEqual(http.post("/api/shelf/restock").json(), {"parts_added": 2, "boxes_added": 0})  # the A and B slots just emptied
+        self.assertEqual(http.post("/api/shelf/restock").json(), {"parts_added": 2})  # the A and B slots just emptied
         tmp.cleanup()

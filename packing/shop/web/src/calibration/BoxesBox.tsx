@@ -68,12 +68,14 @@ export default function BoxesBox({ arm, boxes, apply }: {
                     {b.fixed_jaw_calibrated && ` · fixed jaw ${b.fixed_jaw_calibrated}` +
                       (b.fixed_jaw_used && b.fixed_jaw_used !== b.fixed_jaw_calibrated ? ` (gripped ${b.fixed_jaw_used})` : "")}</td>
                   <td className="btns">
-                    {(b.location !== "supply" || b.state !== "available") && b.state !== "in_use" && (
-                      <button className="act" disabled={busy !== null} title="Someone put it back, empty, at its left spot"
-                              onClick={() => act(`reset:${b.id}`, "POST", `/api/boxes/${b.id}/reset`)}>Reset</button>
+                    {b.state === "packed" ? (
+                      <button className="act" disabled={busy !== null} title="The customer took it: forget this box"
+                              onClick={() => act(`del:${b.id}`, "DELETE", `/api/boxes/${b.id}`)}>Picked up</button>
+                    ) : (
+                      <button className="del" disabled={busy !== null}
+                              title={b.state === "in_use" ? "Only if its order isn't being packed" : undefined}
+                              onClick={() => setConfirmRemove(b.id)}>Remove</button>
                     )}
-                    <button className="del" disabled={busy !== null || b.state === "in_use"}
-                            onClick={() => setConfirmRemove(b.id)}>Remove</button>
                   </td>
                 </tr>
               ))}

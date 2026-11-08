@@ -121,7 +121,7 @@ export type JointName = "shoulder_pan" | "shoulder_lift" | "elbow_flex" | "wrist
 
 export interface ArmState {
   connected: boolean;
-  source: "sim" | "real" | "remote" | null;
+  source: "sim" | "real" | null;
   torque: boolean | null;
   mode: "idle" | "calibrating" | "packing" | "moving";
   stale_s: number | null;

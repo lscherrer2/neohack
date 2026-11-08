@@ -49,15 +49,19 @@ packed (packed = done). UI: Boxes section on the Calibration tab + boxes in the 
   pack spot (260, 0) mm (2.8° set-down; 220 gave 7°). Boxes ≥ ~16 cm from the pan axis can be set down level at their
   mirrored output spot; centers ≥ 12 cm apart in a row (the outer tab points at the inner box).
 - `pack.py` `plan_pack_order`: box supply → pack, retreat 12 cm above the rim, per item pick (reserved pocket) +
-  drop (part hangs `length_mm` past the jaws — per-type ESTIMATES in cell.yaml; jaws ≥ rim + 12 mm, part centered,
-  whole part inside the walls and above the floor) + retreat, box pack → output. Everything near the box at the pack
+  side release (2026-11-07, replaced the gripper-down drop: jaws closing horizontally, tool level or pitched — glue
+  ~65° end first — part center over the box center, jaws + part ≥ rim + 12 mm; `length_mm` per-type ESTIMATES in
+  cell.yaml) + retreat, box pack → output. Everything near the box at the pack
   spot is checked against its volume (jaws, wrist, held part). With the tray straight ahead the pull-outs swept
   through the pack spot (0/33); the user is moving the tray to the LEFT (then all 33 plan in the sim layout).
 - `packer.py` `TrayPacker`: used by `start --robot` for in-process packing (Action → robot agent). Plans, then runs
-  on the hub's arm; on success consumes the reserved units and marks the box packed at output. Failure → order
-  failed, agent stops, a person checks the box (dashboard Reset/Remove).
-- API: `/api/boxes` (+ capture, delete, reset), `/api/arm/box-move`, `/api/orders/{id}/pack-plan` (dry run).
-  UI: Calibration → Packing boxes (Add box, list, Reset/Remove); boxes + pack spot in both 3D views; Controls →
+  on the hub's arm; each unit is consumed as soon as it's out of its pocket; on success the box is packed at output.
+  Missed grip → pocket marked empty, order failed, agent stops, a person sorts it out (dashboard Remove). Refused
+  before moving → order back to queued (see CLAUDE.md).
+- Boxes only move left → right (supply → pack → output); new boxes only via Add box; a packed box is deleted on
+  "Picked up".
+- API: `/api/boxes` (+ capture, delete), `/api/arm/box-move` (to pack|output), `/api/orders/{id}/pack-plan` (dry run).
+  UI: Calibration → Packing boxes (Add box, list, Picked up/Remove); boxes + pack spot in both 3D views; Controls →
   Move a box; Orders → Check (dry run per order).
 
 ### Open

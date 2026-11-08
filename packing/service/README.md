@@ -6,7 +6,7 @@ Design: `.claude/plans/vapi_order_service.md`. **Handoff for the Vapi configurer
 caller ──phone──> Vapi assistant ──tool call──> POST /vapi/webhook ──> order queue (SQLite)
                                                                           │ worker (one at a time)
                                                                           ▼
-caller <──phone── Vapi callback assistant <── POST api.vapi.ai/call <── packed (Cell.package_box)
+caller <──phone── Vapi callback assistant <── POST api.vapi.ai/call <── packed (SimPacker)
 ```
 
 ## Try it without Vapi: terminal phone agent
@@ -23,7 +23,7 @@ Vapi when switching over. Commands: `/hangup`, `/answer`, `/orders`, `/quit`.
 ## Run
 ```bash
 python -m packing.service serve                 # simulated packing (2 s/item), dry-run callbacks
-python -m packing.service serve --robot         # pack on the real arm (all cell poses must be taught)
+# Real packing is only in the shop: python -m packing.shop start --robot (TrayPacker)
 ```
 Vapi must reach the server over HTTPS: e.g. `cloudflared tunnel --url http://localhost:8000`
 or `ngrok http 8000`, then use `https://<host>/vapi/webhook`.

@@ -6,11 +6,12 @@
   POST /api/orders/{id}/action  release a received order to the robot (queued -> ready)
   DELETE /api/orders/{id}       remove an order that isn't being packed / packed
   DELETE /api/orders            remove every such order (keeps packing / packed)
-  POST /api/shelf/restock       after refilling by hand: mark part slots / box spots as full
+  POST /api/shelf/restock       after refilling by hand: mark every empty tray pocket full
   GET  /api/tray                parts tray: pockets (DXF, mm), which are full, calibration (tray -> robot)
   POST /api/tray/pockets/{id}   {"full": bool}  a human marks one pocket full / empty
   POST /api/tray/fill           {"full": bool, "sku": optional}  mark every pocket (of one item) full / empty
   POST /robot/orders/{id}/done      {"box_id": "..."}  -> packed
+  POST /robot/orders/{id}/requeue   {"error": "..."}   refused before moving -> back to queued
   POST /robot/orders/{id}/failed    {"error": "..."}   -> failed
   GET  /orders  GET /orders/{id}  GET /health
   GET  /dashboard/              React app (packing/shop/web, built into static/app): Orders + Calibration tabs
@@ -23,15 +24,14 @@
   POST /api/arm/pick            {"pocket", "confirm_move"} test pick: dry run, then run (same runner/Stop as go-to)
   GET  /api/boxes               calibrated packing boxes (+ pose at their location, pack spot, geometry)
   POST /api/boxes/capture       motors off, gripper level along a box tab, jaws closed on it: add that box
-  DELETE /api/boxes/{id}        remove a box record;  POST /api/boxes/{id}/reset: back to available at supply
-  POST /api/arm/box-move        {"box_id", "to": supply|pack|output, "confirm_move"} move a box by its tab
+  DELETE /api/boxes/{id}        remove a box record (a packed box at output: "Picked up")
+  POST /api/arm/box-move        {"box_id", "to": pack|output, "confirm_move"} move a box by its tab (forward only)
   POST /api/orders/{id}/pack-plan  dry run of packing that order (box in, picks + drops, box out); nothing moves
   GET  /api/desk                desk plane: touched points, live fit, saved plane
   POST /api/desk/capture        motors off, jaw tip on the desk: add a point;  DELETE /api/desk/points[/{i}]
   POST /api/desk/save           fit (3+ points, spread out) + save;  DELETE /api/desk: remove the calibration
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
-  POST /robot/telemetry         joints from a robot agent running in its own process
 """
 
 from __future__ import annotations
@@ -119,12 +119,6 @@ class PocketIn(BaseModel):
 class FillIn(BaseModel):
     full: bool = True
     sku: str | None = None
-
-
-class TelemetryIn(BaseModel):
-    joints: dict[str, float]
-    torque: bool = True
-    source: str = "remote"
 
 
 class ConfirmIn(BaseModel):
@@ -257,6 +251,16 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         events.record("error", f"Order {order_id} failed to pack: {body.error}", order_id=order_id)
         return o.to_dict()
 
+    @app.post("/robot/orders/{order_id}/requeue")
+    def requeue(order_id: int, body: FailedIn):
+        """The packer refused before the arm moved (no box, pack spot taken, can't plan): back to received."""
+        events.robot_seen()
+        _packing(order_id)
+        o = store.update(order_id, "queued", error=body.error)
+        events.record("error", f"Order {order_id} not started: {body.error}. It's back to received — fix that, "
+                               f"then Action it again", order_id=order_id)
+        return o.to_dict()
+
     @app.post("/api/orders/{order_id}/action")
     def action_order(order_id: int):
         try:
@@ -288,10 +292,10 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     def restock():
         if shelf is None:
             raise HTTPException(404, "no shelf configured")
-        parts, boxes = shelf.restock()
-        events.record("order", f"Shelf restocked: {parts} parts and {boxes} boxes added", parts=parts, boxes=boxes)
+        parts = shelf.restock()
+        events.record("order", f"Shelf restocked: {parts} parts added", parts=parts)
         _refill_reservations()
-        return {"parts_added": parts, "boxes_added": boxes}
+        return {"parts_added": parts}
 
     # ---------------- parts tray
     def _tray():
@@ -408,12 +412,6 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             return {"connected": False, "source": None, "torque": None, "mode": "idle", "stale_s": None,
                     "error": "no arm in this server", "joints": None, "frames": None, "tip": None}
         return hub.state()
-
-    @app.post("/robot/telemetry")
-    def telemetry(body: TelemetryIn):
-        if hub is not None:
-            hub.external(body.joints, body.torque, body.source)
-        return {"ok": True}
 
     @app.get("/api/arm")
     def arm_state():
@@ -620,7 +618,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
                                   box_from_grasp)
     from ..boxes.geometry import obstacles as box_obstacles
     from ..boxes.move import box_pose, plan_box_move, too_close
-    from ..boxes.store import BoxError, BoxStore
+    from ..boxes.store import LOCATIONS, BoxError, BoxStore
 
     boxes = BoxStore(store)
 
@@ -701,23 +699,11 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     @app.delete("/api/boxes/{box_id}")
     def boxes_remove(box_id: int):
         try:
-            boxes.remove(box_id)
+            b = boxes.remove(box_id)
         except BoxError as e:
             raise HTTPException(409 if "in use" in str(e) else 404, str(e)) from e
-        events.record("robot", f"Box {box_id} removed", box_id=box_id)
-        return _boxes_state()
-
-    @app.post("/api/boxes/{box_id}/reset")
-    def boxes_reset(box_id: int):
-        """A person put the box back, empty, at its supply spot."""
-        try:
-            b = boxes.get(box_id)
-        except BoxError as e:
-            raise HTTPException(404, str(e)) from e
-        if b.state == "in_use":
-            raise HTTPException(409, f"box {box_id} is in use by order {b.order_id}")
-        boxes.update(box_id, location="supply", state="available", order_id=None)
-        events.record("robot", f"Box {box_id} back at its supply spot (empty)", box_id=box_id)
+        events.record("robot", f"Box {box_id} picked up" + (f" (order {b.order_id})" if b.order_id else "")
+                      if b.state == "packed" else f"Box {box_id} removed", box_id=box_id)
         return _boxes_state()
 
     # ---------------- desk plane (packing/boxes/desk.py): box spot heights follow the real desk
@@ -816,8 +802,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         from ..motion.kinematics import PathError
 
         h, cfg = _hub(), _box_cfg()
-        if body.to not in ("supply", "pack", "output"):
-            raise HTTPException(400, "to must be supply, pack or output")
+        if body.to not in ("pack", "output"):
+            raise HTTPException(400, "to must be pack or output (boxes only move left → right)")
         if not h.connected:
             raise HTTPException(409, "connect the arm first")
         if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
@@ -828,6 +814,10 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(404, str(e)) from e
         if b.location == body.to:
             raise HTTPException(409, f"box {b.id} is already at {body.to}")
+        if LOCATIONS.index(body.to) < LOCATIONS.index(b.location):
+            raise HTTPException(409, f"box {b.id} is at {b.location}; boxes only move left → right")
+        if body.to == "pack" and (other := next((x for x in boxes.list() if x.location == "pack"), None)):
+            raise HTTPException(409, f"box {other.id} is still at the pack spot")
         joints = h.state()["joints"]
         if not joints:
             raise HTTPException(409, "no arm reading yet")

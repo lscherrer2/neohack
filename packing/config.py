@@ -17,7 +17,6 @@ class GripperCfg:
     speed: float = 40.0  # units/s while closing
     squeeze: float = 3.0  # extra closing past the contact point while holding
     min_part_width: float = 3.0  # grip narrower than this (from `closed`) = missed the part
-    min_box_width: float = 10.0  # same, for boxes
     # opening just wide enough for a part (packing/tray/pick.py): width + margin, converted to gripper units
     open_margin_mm: float = 10.0  # total extra opening beyond the part width (both sides together)
     jaw_length_mm: float = 80.0  # jaw pivot -> fingertip (URDF estimate; measure to refine)
@@ -57,12 +56,6 @@ class MotionCfg:
     gravity_gain: float = 0.0  # gravity feed-forward: units of sag per N*m of model gravity torque (real arm only; 0 = off)
     servo_p: int | None = None  # servo P gain for body joints (connect default 16, factory 32)
     servo_accel: int | None = None  # servo acceleration register (connect default 254 = max)
-
-
-@dataclass
-class BoxSlot:
-    pose: str  # location name (poses `<pose>.above` / `<pose>.at`)
-    sku: str | None = None  # None = any part
 
 
 @dataclass
@@ -132,13 +125,8 @@ class CellConfig:
     robot_id: str
     poses_file: Path
     inventory_db: Path
-    travel_pose: str | None
-    part_slots: dict[str, str]  # location -> sku
-    box_supply: list[str]
-    pack_station: str
-    box_output: list[str]
-    box_slots: list[BoxSlot]
-    max_items_per_order: int = 10  # items in one order/box; drop spots cycle through box_slots
+    travel_pose: str | None  # taught pose `home` / `goto` use (None = all-zero mid pose)
+    max_items_per_order: int = 10  # items in one order (= one box)
     catalog: dict[str, str] = field(default_factory=dict)  # sku -> spoken product name (voice ordering)
     gripper: GripperCfg = field(default_factory=GripperCfg)
     motion: MotionCfg = field(default_factory=MotionCfg)
@@ -154,19 +142,8 @@ class CellConfig:
 
     @property
     def stock_slots(self) -> dict[str, str]:
-        """Every place a part can sit, location -> sku: taught part slots plus tray pockets."""
-        return {**self.part_slots, **(self.tray.layout().slots() if self.tray else {})}
-
-    @property
-    def locations(self) -> list[str]:
-        return [*self.part_slots, *self.box_supply, self.pack_station, *self.box_output,
-                *(s.pose for s in self.box_slots)]
-
-    def required_poses(self) -> list[str]:
-        names = [f"{loc}.{k}" for loc in self.locations for k in ("above", "at")]
-        if self.travel_pose:
-            names.insert(0, self.travel_pose)
-        return names
+        """Every place a part can sit, location -> sku: the tray pockets."""
+        return self.tray.layout().slots() if self.tray else {}
 
 
 def load_config(path: str | Path) -> CellConfig:
@@ -178,7 +155,7 @@ def load_config(path: str | Path) -> CellConfig:
         q = Path(p).expanduser()
         return q if q.is_absolute() else base / q
 
-    r, loc = raw["robot"], raw["locations"]
+    r = raw["robot"]
     cfg = CellConfig(
         port=r["port"],
         robot_id=r.get("id", "my_awesome_follower_arm"),
@@ -186,11 +163,6 @@ def load_config(path: str | Path) -> CellConfig:
         inventory_db=(Path(":memory:") if raw.get("inventory_db") == ":memory:"
                       else rel(raw.get("inventory_db", "data/inventory.db"))),
         travel_pose=raw.get("travel_pose", "home"),
-        part_slots={k: str(v) for k, v in (loc.get("part_slots") or {}).items()},
-        box_supply=list(loc.get("box_supply") or []),
-        pack_station=loc["pack_station"],
-        box_output=list(loc.get("box_output") or []),
-        box_slots=[BoxSlot(**s) if isinstance(s, dict) else BoxSlot(pose=s) for s in raw.get("box_slots") or []],
         max_items_per_order=int(raw.get("max_items_per_order", 10)),
         catalog={str(k): str(v) for k, v in (raw.get("catalog") or {}).items()},
         gripper=GripperCfg(**(raw.get("gripper") or {})),

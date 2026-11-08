@@ -1,15 +1,16 @@
 """python -m packing <command>   (run from the repo root with .venv: `source .venv/bin/activate`)
 
-Setup:     check | teach NAME... | teach-all [--missing] | poses | goto NAME | home | release
+Setup:     teach NAME... | poses | goto NAME | where | home | release | tune
 Tray:      tray | tray-calibrate
-Inventory: restock | status | events | set-part ID STATUS | set-box ID LOCATION [--status S] | clear-output
-Run:       demo [--loops N] | pack [--count N] | move-box BOX_ID LOCATION
+Inventory: restock | status | events | set-part ID STATUS
+Run:       demo [--loops N]
 Add --sim to any command to run against a simulated arm (no hardware).
+Orders are packed by the shop (`python -m packing.shop start --robot`, TrayPacker), not from here.
 
 Commands are grouped by what they need:
-  inventory commands (check, poses, restock, ...) only touch files and the database;
+  inventory commands (poses, restock, ...) only touch files and the database;
   arm-direct commands (teach, release) use the bare arm;
-  motion commands (home, goto, ...) also get a `Motion` and a `Cell` with the servo settings applied.
+  motion commands (home, goto, ...) also get a `Motion` with the servo settings applied.
 """
 
 from __future__ import annotations
@@ -21,8 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .cell.inventory import SHIPPED, Inventory, InventoryError
-from .cell.procedures import Cell, CellError
+from .cell.inventory import Inventory, InventoryError
 from .config import CellConfig, load_config
 from .hardware.arm import Arm, FakeArm, RealArm
 from .joints import BODY
@@ -40,19 +40,19 @@ LINE_MIN_DURATION_S = 0.5
 SIM_GRIPPER_BLOCK = 15  # simulated object: gripper stops this far from `closed`
 
 
+class SetupError(RuntimeError):
+    """Something the operator must fix before the command can run (e.g. a missing dependency)."""
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m packing", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", default=str(DEFAULT_CONFIG))
     p.add_argument("--sim", action="store_true", help="simulated arm, no hardware")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check", help="list poses that still need teaching")
     t = sub.add_parser("teach", help="teach named poses, e.g. part_A1.above part_A1.at")
     t.add_argument("names", nargs="+")
     t.add_argument("--limp", action="store_true", help="motors off, move by hand")
-    ta = sub.add_parser("teach-all", help="teach every pose the config needs, in order")
-    ta.add_argument("--missing", action="store_true", help="only poses not taught yet")
-    ta.add_argument("--limp", action="store_true")
     sub.add_parser("poses", help="list taught poses")
     g = sub.add_parser("goto", help="move to a pose (or location: goes to L.above)")
     g.add_argument("name")
@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("where", help="print joint values and gripper-tip position")
     sub.add_parser("home", help="move to the travel/home pose")
     sub.add_parser("release", help="turn motors off (hold the arm!)")
-    sub.add_parser("restock", help="after refilling: mark empty part slots / box supply spots as full")
+    sub.add_parser("restock", help="after refilling: mark every empty tray pocket as full")
     sub.add_parser("tray", help="parts tray: pockets from the DXF, calibration status, which pockets are full")
     sub.add_parser("tray-calibrate", help="motors off: touch the tray reference pockets with the tip, Enter each")
     sub.add_parser("status", help="inventory summary")
@@ -70,11 +70,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("id", type=int)
     sp.add_argument("status", choices=["available", "packed", "missing"])
     sp.add_argument("--location")
-    sb = sub.add_parser("set-box", help="manual fix: say where a box is")
-    sb.add_argument("id")
-    sb.add_argument("location")
-    sb.add_argument("--status", choices=["empty", "packing", "packed"])
-    sub.add_parser("clear-output", help="boxes on output spots were taken away")
     dm = sub.add_parser("demo", help="slow waypoint demo (packing/demo_waypoints.yaml)")
     dm.add_argument("--file", default=str(DEFAULT_DEMO))
     dm.add_argument("--loops", type=int, default=1)
@@ -85,11 +80,6 @@ def build_parser() -> argparse.ArgumentParser:
     tu.add_argument("--accel", type=int, nargs="+", default=[20], help="servo accelerations to try")
     tu.add_argument("--speed", type=float, default=50.0, help="tip speed mm/s")
     tu.add_argument("--sag", type=float, nargs="+", default=[0.0, 0.08], help="sag-compensation gains to try")
-    pk = sub.add_parser("pack", help="package boxes automatically (resumes if interrupted)")
-    pk.add_argument("--count", type=int, default=1)
-    mb = sub.add_parser("move-box", help="move one box to a location")
-    mb.add_argument("id")
-    mb.add_argument("location")
     return p
 
 
@@ -106,24 +96,13 @@ class Session:
 
 @dataclass
 class Rig:
-    """The arm plus the motion and cell layers built on it."""
+    """The arm plus the motion layer built on it."""
 
     arm: Arm
     motion: Motion
-    cell: Cell
 
 
 # ---------- commands that don't need the arm ----------
-def cmd_check(s: Session) -> int:
-    required = s.cfg.required_poses()
-    missing = s.poses.missing(required)
-    print(f"{len(required) - len(missing)}/{len(required)} poses taught.")
-    if missing:
-        print("Still to teach:\n  " + "\n  ".join(missing))
-        print("Run: python -m packing teach-all --missing")
-    return 0 if not missing else 1
-
-
 def cmd_poses(s: Session) -> int:
     for name in s.poses.names():
         print(f"{name:<28} " + " ".join(f"{v:7.1f}" for v in s.poses.get(name).values()))
@@ -131,8 +110,7 @@ def cmd_poses(s: Session) -> int:
 
 
 def cmd_restock(s: Session) -> int:
-    parts, boxes = s.inventory.restock(s.cfg.stock_slots, s.cfg.box_supply)
-    print(f"added {parts} parts, {boxes} boxes")
+    print(f"added {s.inventory.restock(s.cfg.stock_slots)} parts")
     print(s.inventory.summary())
     return EXIT_OK
 
@@ -154,32 +132,11 @@ def cmd_set_part(s: Session) -> int:
     return EXIT_OK
 
 
-def cmd_set_box(s: Session) -> int:
-    s.inventory.move_box(s.args.id, s.args.location, s.args.status)
-    print(s.inventory.summary())
-    return EXIT_OK
-
-
-def cmd_clear_output(s: Session) -> int:
-    for location in s.cfg.box_output:
-        box = s.inventory.box_at(location)
-        if box:
-            s.inventory.move_box(box.id, SHIPPED)
-    print(s.inventory.summary())
-    return EXIT_OK
-
-
 # ---------- commands that use the bare arm ----------
 def cmd_teach(s: Session, arm: Arm) -> int:
     from .tools.teach import teach
 
-    if s.args.cmd == "teach":
-        names = s.args.names
-    else:
-        names = s.cfg.required_poses()
-        if s.args.missing:
-            names = s.poses.missing(names)
-    teach(arm, s.poses, names, limp=s.args.limp)
+    teach(arm, s.poses, s.args.names, limp=s.args.limp)
     return EXIT_OK
 
 
@@ -198,7 +155,7 @@ def _tray_or_exit(s: Session):
 def _pan_xy(cfg: CellConfig):
     try:
         return _load_arm_model(cfg).pan_xy
-    except CellError:
+    except SetupError:
         return None
 
 
@@ -243,10 +200,7 @@ def cmd_tray_calibrate(s: Session, arm: Arm) -> int:
 
 # ---------- commands that move the arm ----------
 def cmd_home(s: Session, rig: Rig) -> int:
-    if s.cfg.travel_pose:
-        rig.cell.travel()
-    else:
-        rig.motion.move_to("home")
+    rig.motion.move_to(s.cfg.travel_pose or "home")
     return EXIT_OK
 
 
@@ -293,38 +247,16 @@ def cmd_demo(s: Session, rig: Rig) -> int:
     return EXIT_OK
 
 
-def cmd_move_box(s: Session, rig: Rig) -> int:
-    rig.cell.check_ready()
-    rig.cell.transfer_box(s.args.id, s.args.location)
-    rig.cell.travel()
-    return EXIT_OK
-
-
-def cmd_pack(s: Session, rig: Rig) -> int:
-    missing = s.poses.missing(s.cfg.required_poses())
-    if missing:
-        raise CellError(f"{len(missing)} poses not taught yet (run `check`)")
-    for i in range(s.args.count):
-        box_id = rig.cell.package_box()
-        print(f"[{i + 1}/{s.args.count}] packed {box_id}")
-    print(s.inventory.summary())
-    return EXIT_OK
-
-
 INVENTORY_COMMANDS: dict[str, Callable[[Session], int]] = {
-    "check": cmd_check,
     "poses": cmd_poses,
     "restock": cmd_restock,
     "status": cmd_status,
     "events": cmd_events,
     "set-part": cmd_set_part,
-    "set-box": cmd_set_box,
-    "clear-output": cmd_clear_output,
     "tray": cmd_tray,
 }
 ARM_COMMANDS: dict[str, Callable[[Session, Arm], int]] = {
     "teach": cmd_teach,
-    "teach-all": cmd_teach,
     "release": cmd_release,
     "tray-calibrate": cmd_tray_calibrate,
 }
@@ -334,8 +266,6 @@ MOTION_COMMANDS: dict[str, Callable[[Session, Rig], int]] = {
     "where": cmd_where,
     "tune": cmd_tune,
     "demo": cmd_demo,
-    "move-box": cmd_move_box,
-    "pack": cmd_pack,
 }
 
 
@@ -373,14 +303,14 @@ def _build_rig(s: Session, arm: Arm) -> Rig:
     gravity = None if s.args.sim else gravity_feedforward(s.cfg.robot_id, s.cfg.motion.gravity_gain)
     motion = Motion(arm, s.poses, s.cfg.motion, s.cfg.gripper, sleep=_no_sleep if s.args.sim else time.sleep,
                     gravity=gravity)
-    return Rig(arm, motion, Cell(s.cfg, motion, s.inventory))
+    return Rig(arm, motion)
 
 
 def _load_arm_model(cfg: CellConfig) -> ArmModel:
     try:
         return ArmModel(load_ranges(cfg.robot_id))
     except ImportError as e:
-        raise CellError("straight-line moves need placo: pip install -r requirements.txt") from e
+        raise SetupError("straight-line moves need placo: pip install -r requirements.txt") from e
 
 
 def _safe_hold(arm: Arm) -> None:
@@ -403,7 +333,7 @@ def _run_with_arm(s: Session) -> int:
         _safe_hold(arm)
         print(s.inventory.summary())
         return EXIT_INTERRUPTED
-    except (MotionError, CellError, InventoryError, PathError, PoseNotTaughtError, ValueError) as e:
+    except (MotionError, SetupError, InventoryError, PathError, PoseNotTaughtError, ValueError) as e:
         print(f"\nSTOPPED: {e}")
         _safe_hold(arm)
         print(s.inventory.summary())

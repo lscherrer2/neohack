@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from contextlib import contextmanager
 from typing import Protocol
 
 from .orders import Order, OrderStore
@@ -27,47 +26,6 @@ class SimPacker:
     def pack(self, order: Order) -> str:
         time.sleep(self.seconds_per_item * len(order.items))
         return f"SIM-BOX-{order.id}"
-
-
-class RobotPacker:
-    """Packs on the real arm via the packing Cell. By default opens the arm per order and keeps torque on
-    after; `arm_provider` (a context manager factory, e.g. `ArmHub.borrow`) lends an already-open arm instead."""
-
-    def __init__(self, config_path, sim_arm: bool = False, arm_provider=None, telemetry=None):
-        self.config_path, self.sim_arm = config_path, sim_arm
-        self.arm_provider, self.telemetry = arm_provider, telemetry  # telemetry: Publish for own-arm mode
-
-    @contextmanager
-    def _own_arm(self, cfg):
-        from ..hardware.arm import FakeArm, RealArm
-        from ..hardware.telemetry import TelemetryArm
-
-        arm = FakeArm() if self.sim_arm else RealArm(cfg.port, cfg.robot_id, cfg.motion.max_step)
-        if self.telemetry:
-            arm = TelemetryArm(arm, self.telemetry)
-        try:
-            yield arm
-        finally:
-            arm.close(release=False)
-
-    def pack(self, order: Order) -> str:
-        from ..cell.inventory import Inventory
-        from ..cell.procedures import Cell
-        from ..config import load_config
-        from ..motion.controller import Motion
-        from ..poses import PoseStore
-
-        cfg = load_config(self.config_path)
-        poses = PoseStore(cfg.poses_file)
-        if missing := poses.missing(cfg.required_poses()):
-            raise RuntimeError(f"{len(missing)} cell poses not taught yet")
-        with (self.arm_provider() if self.arm_provider else self._own_arm(cfg)) as arm:
-            arm.tune(p_gain=cfg.motion.servo_p, accel=cfg.motion.servo_accel)
-            from ..motion.kinematics import gravity_feedforward
-
-            gravity = None if self.sim_arm else gravity_feedforward(cfg.robot_id, cfg.motion.gravity_gain)
-            motion = Motion(arm, poses, cfg.motion, cfg.gripper, log=log.info, gravity=gravity)
-            return Cell(cfg, motion, Inventory(cfg.inventory_db), log=log.info).package_box(order.items)
 
 
 class Worker:

@@ -1,9 +1,6 @@
-# Packing cell layout. Edit to match your table, then: python -m packing check
-#
-# Every LOCATION name below gets two taught poses:
-#   <name>.above   safe spot a few cm above it (gripper clear of everything)
-#   <name>.at      where the gripper closes / opens
-# Teach them with: python -m packing teach-all --missing
+# Packing cell config (copy to cell.yaml): arm, parts tray, gripper and motion settings.
+# Parts come from the tray pockets (DXF); calibrate the tray with: python -m packing tray-calibrate
+# Boxes / desk sections: see cell.yaml (defaults in packing/config.py).
 
 robot:
   port: /dev/cu.usbmodem5CE51213501
@@ -11,26 +8,36 @@ robot:
 
 poses_file: data/poses.json
 inventory_db: data/inventory.db   # or ":memory:" (forgotten when each command exits)
-travel_pose: home          # arm passes through this between stations ('home' = calibration mid-pose)
+travel_pose: home          # pose for `python -m packing home` ('home' = calibration mid-pose)
 
-locations:
-  part_slots:              # location: sku  (one part sits in each slot)
-    part_A1: A
-    part_A2: A
-    part_B1: B
-    part_B2: B
-  box_supply: [box_in_1, box_in_2]     # where empty boxes start
-  pack_station: pack_1                 # box sits here while parts go in
-  box_output: [box_out_1, box_out_2]   # where finished boxes go
+# Parts tray: pockets are read from the DXF; its pose from `python -m packing tray-calibrate`.
+# Pocket ids are <sku>_<n>, n=1 = row nearest the arm (DXF y=0). Plan: .claude/plans/tray_layout.md
+tray:
+  dxf: ../part.dxf
+  calibration_file: data/tray_cal.json
+  protrusion_mm: 10        # every item sticks out this far above the tray face
+  extract_mm: 120          # (not used by picks any more: the pull-out is per part, see pull_mm below)
+  approach_mm: 30
+  # picking (packing/tray/pick.py): approach along the normal, grip, pull straight out, lift
+  grasp_standoff_mm: 3.81  # 0.15 in: gripper tip this far off the tray face when it closes
+  pull_mm: 150             # MAX straight pull-out along the normal. Per part: needs (length_mm − protrusion) + 10 mm
+                           # to clear its socket, prefers up to 40 mm more where it fits
+  lift_mm: 100             # then straight up (drop spot: TBD)
+  max_pitch_deg: 40        # tool may pitch down this much so the pull fits (smallest pitch that fits wins)
+  pitch_step_deg: 10
+  calibration_mode: corners   # corners: touch the middle of each rounded plate corner | pockets: reference_points
+  reference_points: [aa_1, aa_7, breadboard_1, breadboard_5]   # pocket centers touched in "pockets" mode
+  types:                   # sku: DXF feature (mm) + which tray axis the fingers close along;
+                           # length_mm = how far the part hangs past the jaws once picked (ESTIMATES: measure)
+    aa:         {name: AA battery,    feature: circle,   size: 15.5,        grip_axis: x, length_mm: 50}
+    9v:         {name: 9V battery,    feature: rect,     size: [27.5, 18.5], grip_axis: x, length_mm: 48}
+    piezo:      {name: piezo speaker, feature: pin_pair, size: 1.3, spacing: 8, grip_axis: x, grip_mm: 12, length_mm: 15}   # body Ø: estimate, measure
+    glue:       {name: glue stick,    feature: circle,   size: 12.5,        grip_axis: x, length_mm: 120}
+    breadboard: {name: breadboard,    feature: rect,     size: [52, 2.5],   grip_axis: y, min_grip: 1, length_mm: 40}   # thin: tune on hardware
 
-catalog:                   # sku -> name the voice agent uses (SKUs must match part_slots)
-  A: widget
-  B: gadget
+# catalog: (sku -> spoken name) defaults to the tray type names above
 
 max_items_per_order: 10    # items one order (= one box) may hold
-box_slots:                 # drop spots inside the box *at the pack station*, filled in order (repeat if fewer than items)
-  - {pose: box_slot_1, sku: A}
-  - {pose: box_slot_2, sku: B}
 
 gripper:
   open: 60                 # VERIFY with keys mode (y/h): which value is open vs closed on your arm
@@ -38,7 +45,6 @@ gripper:
   speed: 40
   squeeze: 3
   min_part_width: 3        # if the gripper closes tighter than this, the pick counts as missed
-  min_box_width: 10
 
 motion:
   speed: 30                # units/s (joint range is -100..100)

@@ -2,7 +2,8 @@
 
 A box is `available` (calibrated, empty, at its supply spot on the left), `in_use` (taken by an order; at the
 pack spot in the middle while it's filled) or `packed` (done: at its output spot = the supply spot mirrored to
-the right). `location` says where it physically is: supply | pack | output.
+the right). `location` says where it physically is: supply | pack | output. Boxes only move left → right; a packed
+box is deleted when it's picked up, new boxes come in only through Calibration → "Add box".
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ class BoxStore:
     """Shares the OrderStore's connection and lock."""
 
     def __init__(self, orders: OrderStore):
-        self.db, self.lock = orders.db, orders.lock
+        self.orders, self.db, self.lock = orders, orders.db, orders.lock
         self.db.executescript(SCHEMA)
 
     def _row(self, r) -> Box:
@@ -90,7 +91,9 @@ class BoxStore:
     def remove(self, box_id: int) -> Box:
         b = self.get(box_id)
         if b.state == "in_use":
-            raise BoxError(f"box {box_id} is in use by order {b.order_id}")
+            r = self.db.execute("SELECT status FROM orders WHERE id=?", (b.order_id,)).fetchone()
+            if r and r["status"] == "packing":
+                raise BoxError(f"box {box_id} is in use by order {b.order_id}, which is being packed")
         with self.lock:
             self.db.execute("DELETE FROM boxes WHERE id=?", (box_id,))
         return b

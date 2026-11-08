@@ -1,40 +1,34 @@
 # Packing cell (SO-101, no leader arm)
 
-Teach-and-repeat: you teach each fixed position once, the arm replays them, and an SQLite
-inventory records every pick/place so a stopped run can resume. Design notes: `.claude/plans/packing_cell.md`.
+Arm tools (teach, go-to, tray calibration, inventory) for the SO-101. Orders are packed by `TrayPacker`
+(`boxes/packer.py`) inside the shop server (`python -m packing.shop start --robot`, see `shop/README.md`):
+box supply → pack spot, each part picked from its tray pocket and dropped in, box → output. The old
+taught-pose `Cell` path is gone. Plan: `.claude/plans/ROADMAP.md`.
 
 Run everything from the repo root with the venv active: `source .venv/bin/activate` (setup in the top-level README).
 
-## 1. Describe the table — `packing/cell.yaml`
-List the box supply spots, the pack station, output spots, and the positions inside the box. Each
-location `L` needs two poses: `L.above` (safe, clear of everything) and `L.at` (where the gripper
-closes/opens). Parts come from the **parts tray** (`tray:` section): its 33 pockets are read from
-`part.dxf` and its pose comes from calibration (`tray-calibrate` or the dashboard), so pockets are
-**not** taught. (Single taught `part_slots` still work but are empty by default.) Picking from the tray
-is not implemented yet — see `.claude/plans/tray_layout.md`.
+## 1. Config — `packing/cell.yaml`
+Arm port, gripper and motion settings, the **parts tray** (`tray:`: its 33 pockets are read from `part.dxf`,
+its pose comes from calibration, so pockets are **not** taught), boxes (`boxes:`) and the desk plane (`desk:`).
+Boxes are calibrated on the dashboard (Calibration → Add box) and live in the orders DB, not in cell.yaml.
 
-## 2. Teach the poses
+## 2. Teach poses (optional: home, demo waypoints)
 ```bash
-python -m packing check                    # what still needs teaching
-python -m packing teach-all --missing      # jog with keys, ENTER saves each, ESC skips
-python -m packing teach-all --missing --limp   # or: motors off, move by hand, ENTER saves
-python -m packing goto box_in_1.at         # verify a pose
+python -m packing teach home               # jog with keys, ENTER saves, ESC skips (--limp: move by hand)
+python -m packing goto home                # verify a pose (--line: straight tip path)
 ```
 Keys: q/a pan, w/s shoulder, e/d elbow, r/f wrist_flex, t/g wrist_roll, y/h gripper, +/- step.
-Teach `.above` high enough that moving from `home` to it can't hit anything.
 First, check which gripper value is open/closed (y/h) and set `gripper.open/closed` in cell.yaml.
 
-## 3. Stock and run
+## 3. Tray and stock
 ```bash
-python -m packing restock      # after physically filling slots / tray pockets / supply spots (marks them all full)
+python -m packing restock      # after physically filling the tray pockets (marks them all full)
 python -m packing tray         # tray pockets (full/empty), calibration status
 python -m packing tray-calibrate   # motors off: touch the tip to the 4 plate corners (tray.calibration_mode), Enter each
                                    # (the dashboard's Calibration tab does the same, plus a go-to preview)
-python -m packing pack --count 2
-python -m packing status       # what's packed / available / where boxes are
-python -m packing clear-output # after taking finished boxes away
+python -m packing status       # parts available / packed / missing
 ```
-Ctrl+C stops and holds the arm in place. `pack` again resumes from what the inventory says.
+Ctrl+C stops and holds the arm in place.
 
 ## Curved vs straight moves
 - **Joint move** (`goto NAME`, plain sequence step): every joint glides together; the tip follows a
@@ -69,14 +63,11 @@ python -m packing.remote --transport streamable-http --port 8765   # HTTP, for o
 ```
 
 ## When it stops
-- **Missed grasp on a part** → that part is marked `missing`, the next part of the same SKU is tried.
-- **Out of stock / no boxes / output full** → box stays put; refill, `restock` / `clear-output`, run `pack` again.
 - **Blocked joint (following error)** → arm holds; clear the obstruction.
-- **"inventory says the gripper holds …"** → take it out by hand, then e.g.
-  `python -m packing set-part 7 available` or `python -m packing set-box BOX-0003 box_in_1`.
+- **"inventory says the gripper holds …"** → take it out by hand, then e.g. `python -m packing set-part 7 available`.
 
 ## Other
-`home`, `release` (motors off), `move-box ID LOC`, `events`, `poses`. Add `--sim` to any command for
+`home`, `release` (motors off), `where`, `tune`, `events`, `poses`. Add `--sim` to any command for
 a simulated arm (uses separate `data/sim_*` files). Tests: `python -m unittest discover -s packing/tests -t .`
 
 ## Files
@@ -92,8 +83,8 @@ a simulated arm (uses separate `data/sim_*` files). Tests: `python -m unittest d
 | `hardware/keyboard.py` | jog key map, raw-terminal key reading |
 | `motion/controller.py` | `Motion`: smooth moves, settle + following-error checks, sag compensation, grip with stall detection |
 | `motion/kinematics.py` | URDF + placo IK, straight-line paths, link frames; URDF 0° = `calibrate center` pose |
-| `cell/inventory.py` | SQLite parts / boxes / event log → `data/inventory.db`; tray pockets marked full/empty |
-| `cell/procedures.py` | `Cell`: pick/place, transfer_box, pack_part, resumable `package_box` |
+| `cell/inventory.py` | SQLite parts (tray pockets, marked full/empty) + event log → `data/inventory.db` |
+| `boxes/` | boxes (orders DB), box moves, whole-order program, `TrayPacker` |
 | `tray/dxf.py`, `tray/layout.py` | parts tray pockets + plate corners from `part.dxf` (ezdxf) |
 | `tray/calibration.py`, `tray/session.py` | tray → robot rigid fit (scipy) + checks; dashboard calibration session |
 | `tray/goto.py` | go-to preview planner (stand-off along the tray normal) |
