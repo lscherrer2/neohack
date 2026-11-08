@@ -7,10 +7,11 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 from fastapi.testclient import TestClient
 
-from packing.boxes.geometry import (BOX_H, HALF, TAB_T, CaptureError, GripCfg, box_frame, box_from_grasp, box_tilt_deg,
-                                    footprint, mirror, overlaps)
+from packing.boxes.geometry import (BOX_H, HALF, TAB_T, Block, CaptureError, GripCfg, blocks_intersect, box_block,
+                                    box_frame, box_from_grasp, box_tilt_deg, footprint, mirror, overlaps)
 from packing.boxes.move import box_pose, plan_box_move
 from packing.boxes.store import Box, BoxError, BoxStore
 from packing.config import load_config
@@ -81,6 +82,23 @@ class GeometryTests(unittest.TestCase):
         self.assertFalse(overlaps(footprint(a), footprint(box_frame((0.10, 0.17), 0.0, PAN))))  # 12 cm apart; 10 cm: tab touches
 
 
+class BlockTests(unittest.TestCase):
+    def test_overlap_is_3d(self):
+        a = box_block(box_frame((0.32, 0.16), 0.0, PAN))
+        T = np.eye(4)
+        T[:3, 3] = [0.32, 0.16, BOX_H + 0.05]  # a slab hovering 5 cm above the box: no hit in 3D
+        slab = Block("slab", T, np.array([0.1, 0.1, 0.01]))
+        self.assertFalse(blocks_intersect(a, slab))
+        self.assertTrue(overlaps(footprint(box_frame((0.32, 0.16), 0.0, PAN)), np.array(
+            [[0.22, 0.06], [0.42, 0.06], [0.42, 0.26], [0.22, 0.26]])))  # (the old flat check would have said yes)
+        T[2, 3] = BOX_H - 0.005
+        self.assertTrue(blocks_intersect(a, slab))
+        R = Rotation.from_euler("z", 45, degrees=True).as_matrix()
+        T2 = np.eye(4)
+        T2[:3, :3], T2[:3, 3] = R, [0.32 + HALF + 0.045, 0.16, BOX_H / 2]  # rotated, just past the corner
+        self.assertFalse(blocks_intersect(a, Block("r", T2, np.array([0.02, 0.02, 0.02]))))
+
+
 class StoreTests(unittest.TestCase):
     def test_take_reuse_and_lifecycle(self):
         s = BoxStore(OrderStore(":memory:"))
@@ -134,9 +152,20 @@ class PlanTests(unittest.TestCase):
             self.assertLessEqual(plan.max_carry_tilt_deg, 30.0)
             cur = plan.steps[-1].path[-1]
 
+    def test_carries_over_an_obstacle_instead_of_refusing(self):
+        box = make_box(0.32, 0.16)
+        cur = HOME
+        T = np.eye(4)  # a 12 cm tall wall between the supply spot and the pack spot
+        T[:3, 3] = [0.36, 0.085, 0.06]
+        wall = Block("a wall", T, np.array([0.03, 0.004, 0.06]))
+        plan = plan_box_move(MODEL, box, "supply", "pack", cur, self.cfg, [wall])
+        self.assertGreater(plan.carry_mm, self.cfg.boxes.carry_mm)  # went higher to clear it
+        low = plan_box_move(MODEL, box, "supply", "pack", cur, self.cfg)
+        self.assertEqual(low.carry_mm, self.cfg.boxes.carry_mm)  # nothing in the way: lowest lift
+
     def test_refuses_collisions_and_tilted_landings(self):
         box = make_box(0.32, 0.16)
-        blocker = ("box 2", footprint(box_frame((0.35, 0.0), 0.0, PAN)))  # sitting on the pack spot
+        blocker = box_block(box_frame((0.345, 0.0), 0.0, PAN), "box 2")  # sitting on the pack spot
         with self.assertRaises(PathError) as e:
             plan_box_move(MODEL, box, "supply", "pack", HOME, self.cfg, [blocker])
         self.assertIn("overlap box 2", str(e.exception))

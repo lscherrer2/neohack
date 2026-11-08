@@ -4,8 +4,9 @@ The grip is horizontal (user, 2026-11-07): gripper level, pointing away from the
 up/down on the 2 mm plate.
 
   open → free move to `approach_mm` back from the grasp (toward the arm, level) → in LEVEL along the tab → grip
-  → straight UP `carry_mm` (clears the tray and neighbouring boxes before any sideways motion) → joint-space carry
-  to above the destination (checked: never dips, box tilt ≤ MAX_CARRY_TILT_DEG, footprint clear of obstacles)
+  → straight UP (`carry_mm`, or higher — CARRY_HEIGHTS_MM — until the carry clears everything: uses the vertical
+  space over the tray / other boxes) → joint-space carry to above the destination (checked in 3D: never dips, box
+  tilt ≤ MAX_CARRY_TILT_DEG, the box block ≥ CLEARANCE from the other boxes and the tray + its stand)
   → straight DOWN to exactly the grasp height (the box lands where it will be picked up again; box tilt ≤
   MAX_LAND_TILT_DEG) → open → back out LEVEL along the tab.
 
@@ -26,10 +27,12 @@ import numpy as np
 from ..motion.kinematics import ArmModel, PathError
 from ..motion.program import ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets
-from .geometry import TAB_T, box_frame, box_tilt_deg, footprint, mirror, overlaps
+from .geometry import TAB_T, Block, blocks_intersect, box_block, box_frame, box_tilt_deg, mirror
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
+CARRY_HEIGHTS_MM = (60.0, 100.0, 140.0, 180.0, 220.0)  # tried after `carry_mm` when a carry would hit something
+CLEARANCE = 0.010  # carried box kept this far from other boxes / the tray (m)
 MAX_LAND_TILT_DEG = 5.0  # box tilt when setting it down (more = it lands on one edge, off its spot)
 OW = 0.05  # box lines: position (level in/out, straight up/down, exact landing) beats holding the exact tool yaw
 LOCATION_NAMES = {"supply": "its supply spot (left)", "pack": "the pack spot", "output": "its output spot (right)"}
@@ -91,27 +94,27 @@ class BoxMovePlan:
                 "max_carry_tilt_deg": round(self.max_carry_tilt_deg, 1), "steps": describe(self.steps)}
 
 
-def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float,
-                obstacles: list[tuple[str, np.ndarray]], bc, samples: int = 24) -> float:
+def check_carry(model: ArmModel, box: Box, a: dict, b: dict, z_grasp: float, lift_m: float,
+                obstacles: list[Block], samples: int = 30) -> float:
     """The joint-space carry from pose a to b: the box stays up (tool never below half the lift above the grasp
-    height), its tilt stays ≤ MAX_CARRY_TILT_DEG, and its footprint never overlaps an obstacle (other boxes, the
-    tray). Returns the largest box tilt. Raises PathError."""
+    height), its tilt stays ≤ MAX_CARRY_TILT_DEG, and the box (3D block) never comes within CLEARANCE of an
+    obstacle (other boxes, the tray and its stand). Returns the largest box tilt. Raises PathError."""
     worst = 0.0
     tool_in_box_inv = np.linalg.inv(box.tool_in_box)
     for i in range(samples + 1):
         s = i / samples
         T = model.fk({j: a[j] + (b[j] - a[j]) * s for j in a})
-        if T[2, 3] < z_grasp + bc.carry_mm / 2000:
+        if T[2, 3] < z_grasp + lift_m / 2:
             raise PathError(f"carrying box {box.id} would dip to {(T[2, 3] - z_grasp) * 1000:.0f} mm above its "
                             f"grasp height")
         tilt = box_tilt_deg(T, box.tool_in_box)
         worst = max(worst, tilt)
         if tilt > MAX_CARRY_TILT_DEG:
             raise PathError(f"carrying box {box.id} would tilt it {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)")
-        fp = footprint(T @ tool_in_box_inv, margin=0.005)
-        for name, other in obstacles:
-            if overlaps(fp, other):
-                raise PathError(f"carrying box {box.id} would hit {name} ({s:.0%} of the way)")
+        carried = box_block(T @ tool_in_box_inv)
+        for ob in obstacles:
+            if blocks_intersect(carried, ob, CLEARANCE / 2):
+                raise PathError(f"carrying box {box.id} would hit {ob.name} ({s:.0%} of the way)")
     return worst
 
 
@@ -122,14 +125,16 @@ def _level(v: np.ndarray) -> np.ndarray:
 
 
 def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[str, float], cfg,
-                  obstacles: list[tuple[str, np.ndarray]] | None = None) -> BoxMovePlan:
-    """`obstacles`: (name, footprint Nx2) of other boxes / the tray, for the carry check.
+                  obstacles: list[Block] | None = None) -> BoxMovePlan:
+    """`obstacles`: 3D blocks of the other boxes / the tray, for the landing and carry checks. The carry goes as
+    low as possible: `carry_mm`, then higher (CARRY_HEIGHTS_MM) until it clears everything.
     Raises PathError if any part is unreachable, over a joint limit, too tilted or would collide."""
     pan_xy = model.pan_xy
+    obstacles = obstacles or []
     T_land_box = box_pose(box, dst, cfg, pan_xy)
-    for name, other in obstacles or []:
-        if overlaps(footprint(T_land_box, margin=0.005), other):
-            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(dst, dst)} would overlap {name}")
+    for ob in obstacles:
+        if blocks_intersect(box_block(T_land_box), ob, 0.0025):
+            raise PathError(f"box {box.id} at {LOCATION_NAMES.get(dst, dst)} would overlap {ob.name}")
     bc, g = cfg.boxes, cfg.gripper
     T_src = box_pose(box, src, cfg, pan_xy) @ box.tool_in_box
     T_dst = T_land_box @ box.tool_in_box
@@ -149,16 +154,28 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     travel = max(abs(move.pose[j] - b.start[j]) for j in move.pose)
     b.line_to(T_src[:3, 3], bc.down_speed_mm_s, "in level along the tab", orientation_weight=OW)
     b.grip(min_width, f"grip box {box.id}")
-    b.line_by(up * bc.carry_mm / 1000, bc.line_speed_mm_s, f"lift straight up {bc.carry_mm:.0f} mm",
-              orientation_weight=OW)
-    b.check_holding(min_width, "check holding the box")
-    lifted = b.pose
-    dst_up = T_dst[:3, 3] + up * bc.carry_mm / 1000
-    targets, poses = best_targets(model, ik, dst_up, T_dst[:3, 2], T_dst[:3, 0], [lifted, *reach_seeds(model, dst_up)])
-    carry = b.joint_to(targets[0], f"carry to above {LOCATION_NAMES[dst]}", seeds=poses, targets=targets[:1],
-                       speed=cfg.motion.speed / 2)
-    worst = check_carry(model, box, lifted, carry.pose, float(T_src[2, 3]), obstacles or [], bc)
-    land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, "straight down to the table (same height as picked)",
+    gripped = b.mark()
+    heights = [bc.carry_mm] + [h for h in CARRY_HEIGHTS_MM if h > bc.carry_mm]
+    last_err: PathError | None = None
+    for lift_mm in heights:  # use vertical space: lowest carry that clears everything
+        b.reset(gripped)
+        try:
+            b.line_by(up * lift_mm / 1000, bc.line_speed_mm_s, f"lift straight up {lift_mm:.0f} mm",
+                      orientation_weight=OW)
+            b.check_holding(min_width, "check holding the box")
+            lifted = b.pose
+            dst_up = T_dst[:3, 3] + up * lift_mm / 1000
+            targets, poses = best_targets(model, ik, dst_up, T_dst[:3, 2], T_dst[:3, 0],
+                                          [lifted, *reach_seeds(model, dst_up)])
+            carry = b.joint_to(targets[0], f"carry to above {LOCATION_NAMES[dst]}", seeds=poses, targets=targets[:1],
+                               speed=cfg.motion.speed / 2)
+            worst = check_carry(model, box, lifted, carry.pose, float(T_src[2, 3]), lift_mm / 1000, obstacles)
+            break
+        except PathError as e:
+            last_err = e
+    else:
+        raise PathError(f"no carry height up to {heights[-1]:.0f} mm works: {last_err}")
+    land = b.line_to(T_dst[:3, 3], bc.down_speed_mm_s, f"straight down {lift_mm:.0f} mm to the table (same height as picked)",
                      orientation_weight=OW)
     land_tilt = box_tilt_deg(model.fk(land.path[-1]), box.tool_in_box)
     if land_tilt > MAX_LAND_TILT_DEG:
@@ -167,4 +184,4 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.open_gripper("release the box", open_value)
     b.line_by(-_level(T_dst[:3, 2]) * bc.approach_mm / 1000, bc.line_speed_mm_s, "back out level along the tab",
               orientation_weight=OW)
-    return BoxMovePlan(box.id, src, dst, b.steps, travel, bc.carry_mm, tilt_deg=land_tilt, max_carry_tilt_deg=worst)
+    return BoxMovePlan(box.id, src, dst, b.steps, travel, lift_mm, tilt_deg=land_tilt, max_carry_tilt_deg=worst)

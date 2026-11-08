@@ -593,7 +593,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         return _arm_state()
 
     # ---------------- packing boxes (packing/boxes/)
-    from ..boxes.geometry import BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, box_from_grasp, footprint, overlaps
+    from ..boxes.geometry import (BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, blocks_intersect, box_block,
+                                  box_from_grasp)
     from ..boxes.geometry import obstacles as box_obstacles
     from ..boxes.move import box_pose, plan_box_move
     from ..boxes.store import BoxError, BoxStore
@@ -615,8 +616,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         cfg = _box_cfg()
         return {b.id: box_pose(b, b.location, cfg, pan_xy) for b in boxes.list()}
 
-    def _obstacles(pan_xy, skip: int | None = None) -> list[tuple[str, np.ndarray]]:
-        """Footprints (table plane) of the other boxes and of the parts tray."""
+    def _obstacles(pan_xy, skip: int | None = None):
+        """3D blocks of the other boxes and of the parts tray (+ its stand)."""
         return box_obstacles(_box_cfg(), _box_poses(pan_xy), skip)
 
     def _boxes_state() -> dict:
@@ -657,9 +658,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409 if isinstance(e, ArmBusy) else 422, str(e)) from e
         if T_box[1, 3] < pan[1]:
             raise HTTPException(422, "that box is on the right of the arm — supply boxes go on the LEFT")
-        for name, fp in _obstacles(pan):
-            if overlaps(footprint(T_box, margin=0.005), fp):
-                raise HTTPException(422, f"that box would overlap {name} — is it already calibrated?")
+        for ob in _obstacles(pan):  # 3D: a box may sit under the tray's overhang, not inside it
+            if blocks_intersect(box_block(T_box), ob, 0.0025):
+                raise HTTPException(422, f"that box would overlap {ob.name} — is it already calibrated?")
         b = boxes.add(T_box, np.linalg.inv(T_box) @ T_tool, body, report)
         c = T_box[:3, 3] * 1000
         events.record("robot", f"Box {b.id} added at ({c[0]:.0f}, {c[1]:.0f}) mm", box_id=b.id, **report)

@@ -82,3 +82,13 @@ which made the vertical-grip planner report a 12° carry tilt.)
   the floor.
 - Sim layout used in tests: tray rotated 60° left at 33 cm, supply box at (316, 160) mm → all 33 pockets plan.
 
+### Change 2026-11-07 (later): 3D collision checks + vertical space
+User: "it keeps saying it will hit the parts tray, but it has so much room to go over it". Cause: the carry check
+compared 2D table footprints (a leftover from the fixed 30 mm lift), so any xy crossing counted as a hit, and the
+lift height was fixed. Now: `geometry.Block` + separating-axis `blocks_intersect`; obstacles = other boxes (body +
+tab block) and the tray (`tray_blocks`: plate + protrusion, plus a stand block from the desk up to the plate's
+lowest point). The carried box is checked as a 3D block (10 mm clearance) at 30 samples. `plan_box_move` tries the
+lift `carry_mm` (30) first, then 60/100/140/180/220 mm until the carry clears; landing + capture overlap checks
+are 3D too. Reach (sim): a level grip reaches tool heights up to ~33 cm at grip radii 26–30 cm, so the box bottom
+can go ~25 cm above the desk.
+

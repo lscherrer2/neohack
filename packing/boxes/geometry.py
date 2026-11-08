@@ -125,14 +125,76 @@ def mirror(T_box: np.ndarray, pan_xy: np.ndarray) -> np.ndarray:
     return box_frame((c[0], 2 * pan_xy[1] - c[1]), c[2], pan_xy)
 
 
-def obstacles(cfg, box_poses: dict[int, np.ndarray], skip: int | None = None) -> list[tuple[str, np.ndarray]]:
-    """Table-plane footprints of the other boxes (at their current spots) and of the calibrated parts tray."""
-    out = [(f"box {bid}", footprint(T, margin=0.005)) for bid, T in box_poses.items() if bid != skip]
-    tray = getattr(cfg, "tray", None)
-    cal = tray.calibration() if tray else None
-    if cal:
-        o = tray.layout().outline
-        corners = [cal.to_robot(x, y)[:2] for x, y in ((o["xmin"], o["ymin"]), (o["xmax"], o["ymin"]),
-                                                        (o["xmax"], o["ymax"]), (o["xmin"], o["ymax"]))]
-        out.append(("the parts tray", np.array(corners)))
-    return out
+# ---------------------------------------------------------------- 3D collision blocks
+@dataclass
+class Block:
+    """An oriented 3D block: 4x4 pose of its center + half extents (m). For collision checks."""
+
+    name: str
+    T: np.ndarray
+    half: np.ndarray
+
+
+def blocks_intersect(a: Block, b: Block, margin: float = 0.0) -> bool:
+    """Do two oriented blocks (each grown by `margin`) overlap? Separating-axis test (15 axes)."""
+    Ra, Rb = a.T[:3, :3], b.T[:3, :3]
+    ha, hb = a.half + margin, b.half + margin
+    d = b.T[:3, 3] - a.T[:3, 3]
+    axes = [Ra[:, i] for i in range(3)] + [Rb[:, i] for i in range(3)]
+    axes += [np.cross(Ra[:, i], Rb[:, j]) for i in range(3) for j in range(3)]
+    for ax in axes:
+        n = np.linalg.norm(ax)
+        if n < 1e-9:
+            continue
+        ax = ax / n
+        ra = float(np.sum(ha * np.abs(Ra.T @ ax)))
+        rb = float(np.sum(hb * np.abs(Rb.T @ ax)))
+        if abs(float(d @ ax)) > ra + rb:
+            return False
+    return True
+
+
+def box_block(T_box: np.ndarray, name: str = "box") -> Block:
+    """The box body + its tab as one block (box frame: origin bottom center, tab along −y)."""
+    T = T_box.copy()
+    T[:3, 3] = T_box[:3, :3] @ np.array([0.0, -TAB_OUT / 2, BOX_H / 2]) + T_box[:3, 3]
+    return Block(name, T, np.array([HALF, HALF + TAB_OUT / 2, BOX_H / 2]))
+
+
+PLATE_T = 0.006  # tray plate thickness (m)
+
+
+def tray_blocks(tray_cfg) -> list[Block]:
+    """The calibrated parts tray: its plate (+ the parts sticking out of it) and the space under it down to the
+    desk (whatever holds it up). Empty if not calibrated."""
+    cal = tray_cfg.calibration() if tray_cfg else None
+    if cal is None:
+        return []
+    o = tray_cfg.layout().outline
+    zlo, zhi = -PLATE_T, tray_cfg.protrusion_mm * MM
+    T = np.eye(4)
+    T[:3, :3] = cal.rot
+    T[:3, 3] = cal.to_robot((o["xmin"] + o["xmax"]) / 2, (o["ymin"] + o["ymax"]) / 2, (zlo + zhi) / 2 / MM)
+    plate = Block("the parts tray", T, np.array([(o["xmax"] - o["xmin"]) / 2 * MM, (o["ymax"] - o["ymin"]) / 2 * MM,
+                                                 (zhi - zlo) / 2]))
+    corners = np.array([cal.to_robot(x, y, z / MM) for x in (o["xmin"], o["xmax"]) for y in (o["ymin"], o["ymax"])
+                        for z in (zlo, zhi)])
+    bottom = float(corners[:, 2].min())
+    if bottom < 0.005:
+        return [plate]
+    ux = cal.rot[:, 0].copy()
+    ux[2] = 0.0
+    ux = ux / np.linalg.norm(ux) if np.linalg.norm(ux) > 1e-6 else np.array([1.0, 0.0, 0.0])
+    uy = np.array([-ux[1], ux[0], 0.0])
+    a, b = corners[:, :2] @ ux[:2], corners[:, :2] @ uy[:2]
+    Ts = np.eye(4)
+    Ts[:3, :3] = np.column_stack([ux, uy, [0.0, 0.0, 1.0]])
+    Ts[:3, 3] = ux * (a.min() + a.max()) / 2 + uy * (b.min() + b.max()) / 2 + np.array([0, 0, bottom / 2])
+    support = Block("the parts tray (stand)", Ts, np.array([(a.max() - a.min()) / 2, (b.max() - b.min()) / 2, bottom / 2]))
+    return [plate, support]
+
+
+def obstacles(cfg, box_poses: dict[int, np.ndarray], skip: int | None = None) -> list[Block]:
+    """3D blocks of the other boxes (at their current spots) and of the calibrated parts tray."""
+    return ([box_block(T, f"box {bid}") for bid, T in box_poses.items() if bid != skip]
+            + tray_blocks(getattr(cfg, "tray", None)))
