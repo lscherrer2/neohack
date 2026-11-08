@@ -42,7 +42,19 @@ class Catalog:
         counts: dict[str, int] = {}
         for s in skus:
             counts[s] = counts.get(s, 0) + 1
-        return ", ".join(f"{n} {self.products.get(s, s)}" for s, n in counts.items())
+        return ", ".join(f"{n} {plural(self.products.get(s, s), n)}" for s, n in counts.items())
+
+
+def plural(name: str, n: int) -> str:
+    """English plural of the last word for n != 1: battery -> batteries, box -> boxes, stick -> sticks."""
+    if n == 1 or not name:
+        return name
+    low = name.lower()
+    if low.endswith("y") and low[-2:-1] not in "aeiou":
+        return name[:-1] + "ies"
+    if low.endswith(("s", "x", "z", "ch", "sh")):
+        return name + "es"
+    return name + "s"
 
 
 def parse_items(raw, catalog: Catalog) -> list[str]:

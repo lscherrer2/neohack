@@ -130,13 +130,19 @@ def main() -> None:
         import os
 
         token = args.mcp_token or os.environ.get("SHOP_MCP_TOKEN") or None
+        callbacks = None
+        if args.cmd == "start" and args.robot:  # simulated packing never phones anyone
+            from .callback import Callbacks
+
+            callbacks = Callbacks.from_env(store, catalog, events)
+        print(f"Customer callbacks (Vapi): {'on' if callbacks else 'off'}")
         print(f"Dashboard: http://{args.host}:{args.port}/dashboard/")
         print(f"Remote-agent MCP: http://{args.host}:{args.port}/agent/mcp "
               f"(auth: {'bearer token' if token else 'NONE, open'}; hosts: {', '.join(args.allow_host or ['any'])})")
         try:
             uvicorn.run(create_server(store, catalog, events=events, auto_dispatch=args.auto, shelf=shelf, hub=hub,
                                       box_packing=bool(args.robot) and args.cmd == "start",
-                                      agent_token=token, agent_hosts=args.allow_host),
+                                      agent_token=token, agent_hosts=args.allow_host, callbacks=callbacks),
                         host=args.host, port=args.port, timeout_graceful_shutdown=2)
         finally:
             if hub.connected and hub.mode == "idle":

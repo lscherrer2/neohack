@@ -284,6 +284,15 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   only `/agent/mcp` checks the token. Flags: `--mcp-token` (or env
   `SHOP_MCP_TOKEN`) → Bearer auth, else open; `--allow-host` (repeatable, wildcards) → Host check, else any host.
   `/mcp` (chat agent's tools) is unchanged.
+- **Customer callbacks** (`shop/callback.py`, only in `start --robot` — simulated packing never calls): when the
+  robot reports an order `packed` or `failed`, the server phones the customer once (no redials) via Vapi
+  `POST https://api.vapi.ai/call` (background thread): follow-up assistant `VAPI_CALLBACK_ASSISTANT_ID`, outbound
+  number `VAPI_PHONE_NUMBER_ID`, key `VAPI_API_KEY` — env or `.env.local` (never print them). Sends
+  `assistantOverrides.firstMessage` ("…your order with 2 AA batteries is ready for pickup" / "…couldn't pack…") and
+  `variableValues` `order_id/customer_name/items/status` (ready|failed). No phone on the order = skipped. Result in
+  the order's `callback_status` (calling | called | skipped: … | failed: …) + `callback_call_id`, shown under the
+  order's items in the dashboard and in the activity log. Requeue (refused before moving) doesn't call. Assistant
+  system prompt to paste into Vapi: `packing/shop/vapi_callback_prompt.md`.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
   Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 

@@ -129,6 +129,11 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
                           : `Reserved: ${o.slots.join(", ")}`}
                       </div>
                     )}
+                    {o.callback_status && (
+                      <div className={`slots ${o.callback_status.startsWith("failed") ? "short" : "sub"}`}>
+                        Callback: {o.callback_status}
+                      </div>
+                    )}
                     {checks[o.id] && (
                       <div className={`slots ${checks[o.id].ok ? "sub" : "short"}`}>{checks[o.id].text}</div>
                     )}

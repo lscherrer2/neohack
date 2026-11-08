@@ -12,6 +12,7 @@ export interface Order {
   customer_name?: string | null;
   items_text?: string;
   error?: string | null;
+  callback_status?: string | null; // phone callback: calling | called | skipped: ... | failed: ...
   created_at: string;
   [k: string]: unknown;
   slots?: (string | null)[]; // reserved unit per item (null = short)

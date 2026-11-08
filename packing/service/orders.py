@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS orders (
     vapi_call_id TEXT,                -- the inbound call that placed it
     tool_call_id TEXT UNIQUE,         -- idempotency key for retried Vapi tool calls
     box_id TEXT,
-    callback_call_id TEXT,
+    callback_call_id TEXT,            -- the outbound "your order is ready / failed" call (shop/callback.py)
+    callback_status TEXT,             -- calling | called | skipped: ... | failed: ...
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -80,6 +81,7 @@ class Order:
     created_at: str
     updated_at: str
     slots: list[str | None] = field(default_factory=list)  # reserved unit per item (None = short); [] = none
+    callback_status: str | None = None  # outbound callback: calling | called | skipped: ... | failed: ...
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -110,6 +112,9 @@ class OrderStore:
         self.db = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(orders)")}
+        if "callback_status" not in cols:  # databases made before callbacks
+            self.db.execute("ALTER TABLE orders ADD COLUMN callback_status TEXT")
         self.lock = threading.Lock()  # server threads + worker thread share one connection
 
     def _row(self, r: sqlite3.Row) -> Order:
@@ -265,7 +270,7 @@ class OrderStore:
         return self.get(order_id) if cur.rowcount else None
 
     def update(self, order_id: int, status: str | None = None, **fields) -> Order:
-        allowed = {"box_id", "callback_call_id", "error"}
+        allowed = {"box_id", "callback_call_id", "callback_status", "error"}
         if bad := set(fields) - allowed:
             raise ValueError(f"can't update {bad}")
         if status and status not in STATUSES:

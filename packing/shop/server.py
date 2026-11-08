@@ -175,11 +175,13 @@ class FailedIn(BaseModel):
 
 def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None = None,
                   auto_dispatch: bool = False, shelf=None, hub=None, agent_token: str | None = None,
-                  agent_hosts: list[str] | None = None, box_packing: bool = False) -> FastAPI:
+                  agent_hosts: list[str] | None = None, box_packing: bool = False,
+                  callbacks=None) -> FastAPI:
     """auto_dispatch: initial state of the dashboard's "Auto pack" toggle (PUT /api/auto-pack). Off: the robot only
     packs orders someone clicked "Action" on. On: also the NEWEST received order whose items all have a reserved unit
     (and, with box_packing, once an empty box waits at supply and the pack spot is free).
     box_packing: the robot packs into boxes (TrayPacker, `start --robot`).
+    callbacks: callback.Callbacks — phone the customer when an order is packed / failed (None = no calls).
     hub: ArmHub (live arm view + calibration tab); None = no arm in this server.
     agent_token / agent_hosts: the remote-agent FastMCP server at /agent/mcp (mcp_server.py) — bearer token
     (None = open) and allowed Host headers (None = any, like /mcp; tunnel hostnames change)."""
@@ -301,6 +303,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         _packing(order_id)
         o = store.update(order_id, "packed", box_id=body.box_id)
         events.record("order", f"Order {order_id} packed", order_id=order_id, box_id=body.box_id)
+        if callbacks:
+            callbacks.order_finished(o)
         return o.to_dict()
 
     @app.post("/robot/orders/{order_id}/failed")
@@ -313,6 +317,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             auto["on"] = False
             events.record("order", "Auto pack turned off after the failure; check the arm, then send the next order "
                                    "with Action or turn auto pack back on", order_id=order_id)
+        if callbacks:
+            callbacks.order_finished(o)
         return o.to_dict()
 
     @app.post("/robot/orders/{order_id}/requeue")
