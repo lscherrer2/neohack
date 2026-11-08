@@ -179,7 +179,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   rim, end above the floor; no wall check), box → its supply spot mirrored right. Tray goes on the LEFT.
   `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
   Orders → Check). Part `length_mm` per tray type = estimates (drop height).
-- **Desk plane** (`packing/boxes/desk.py`, Calibration tab → Desk): motors off, touch the closed jaw tip to the desk at
+- **Desk plane** (handoff doc `.claude/plans/FLOOR_CALIBRATION.md`; `packing/boxes/desk.py`, Calibration tab → Desk): motors off, touch the closed jaw tip to the desk at
   3+ spots far apart → least-squares plane (refused if < 3 points, bunched/collinear, or RMS > 3 mm), saved to
   `data/desk_cal.json` (`desk.calibration_file`; sim: `sim_desk_cal.json`). Box spots away from the calibrated one
   (pack spot, mirrored output) take height = calibrated bottom + plane(xy) − plane(calibrated xy) — only
