@@ -145,6 +145,13 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   **Action** → `ready`; the robot agent only claims `ready` orders (`--auto` claims `queued`).
   **Delete** (one click, no confirm) allowed for queued/ready/failed/cancelled; **Delete all** (`DELETE /api/orders`,
   click twice within 3 s) removes every such order. Statuses: queued → ready → packing → packed | failed.
+- **Per-unit reservations** (plan `.claude/plans/boxes_and_reservations.md`): every item of an open order
+  (queued/ready/packing/failed) owns one specific pocket/slot — `reservations` table in the orders DB,
+  `UNIQUE(slot)`, all-or-nothing `OrderStore.create(..., stock=shelf.stock)` in one IMMEDIATE transaction
+  (lowest-numbered free unit first). SQLite triggers release them on cancel/delete and consume them on packed.
+  Pocket marked empty → reservation moves to another free unit or the item goes short (`slot` NULL); marked full /
+  restock → `fill_short`. **Locked**: units of a `packing` order can't be changed from the dashboard (409; bulk fill
+  skips them). Tray API: `reserved_by`, `locked`; orders carry `slots`. Sim packing consumes exactly those units.
 - **Real data only** (user asked: no placeholder stock): orders in `packing/data/shop_orders.db`;
   stock from the cell inventory `packing/data/inventory.db` via `shelf.Shelf` (opens the DB per call —
   SQLite connections are per-thread). Inventory starts empty: dashboard **Restock** after filling slots.

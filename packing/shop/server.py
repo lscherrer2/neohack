@@ -175,6 +175,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     @asynccontextmanager
     async def lifespan(_app):
         events.record("system", "Server started")
+        if shelf is not None:  # orders made before per-unit reservations existed get their units now
+            if changed := store.fill_short(shelf.stock()):
+                events.record("system", f"Reserved stock units for orders {', '.join(map(str, changed))}")
         recovered = store.list("packing")  # left in progress by a robot agent; claim hands it back
         if recovered:
             events.record("system", f"Order {recovered[0].id} was mid-pack when the server stopped; "
@@ -272,6 +275,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(404, "no shelf configured")
         parts, boxes = shelf.restock()
         events.record("order", f"Shelf restocked: {parts} parts and {boxes} boxes added", parts=parts, boxes=boxes)
+        _refill_reservations()
         return {"parts_added": parts, "boxes_added": boxes}
 
     # ---------------- parts tray
@@ -288,10 +292,11 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
         tray = _tray()
         layout, full, cal = tray.layout(), shelf.full_slots(), tray.calibration()
+        reserved, locked = store.reserved_slots(), store.locked_slots()
         pockets = []
         for p in layout.pockets:
             d = {"id": p.id, "sku": p.sku, "x": p.x, "y": p.y, "yaw_deg": p.yaw_deg, "shape": p.shape,
-                 "full": p.id in full}
+                 "full": p.id in full, "reserved_by": reserved.get(p.id), "locked": p.id in locked}
             if cal:
                 d["robot_m"] = [round(float(v), 5) for v in cal.to_robot(p.x, p.y)]
             pockets.append(d)
@@ -306,9 +311,33 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
                 "matrix": cal.matrix(), "reference_points": [p.pocket for p in cal.points]},
         }
 
+    def _refill_reservations() -> None:
+        """Units became available: give short order items one."""
+        for oid in store.fill_short(shelf.stock()):
+            o = store.get(oid)
+            events.record("order", f"Order {oid} now has all its stock reserved" if all(o.slots)
+                          else f"Order {oid} got more of its stock reserved", order_id=oid)
+
+    def _emptied(slots: list[str]) -> None:
+        """Units are gone: move their reservations to other free units, or mark the items short."""
+        stock = shelf.stock()
+        for slot in slots:
+            oid = store.release_slot(slot, stock)
+            if oid is None:
+                continue
+            o = store.get(oid)
+            if None in o.slots:
+                events.record("error", f"Order {oid} is short: {slot} was marked empty and no other unit is free",
+                              order_id=oid, pocket=slot)
+            else:
+                events.record("order", f"Order {oid}: {slot} was marked empty; reserved another unit instead",
+                              order_id=oid, pocket=slot)
+
     @app.post("/api/tray/pockets/{pocket_id}")
     def set_pocket(pocket_id: str, body: PocketIn):
         _tray()
+        if pocket_id in store.locked_slots():
+            raise HTTPException(409, f"{pocket_id} is locked: its order is being packed")
         try:
             changed = shelf.set_slot(pocket_id, body.full)
         except KeyError as e:
@@ -316,6 +345,10 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         if changed:
             events.record("order", f"Pocket {pocket_id} marked {'full' if body.full else 'empty'}",
                           pocket=pocket_id, full=body.full)
+            if body.full:
+                _refill_reservations()
+            else:
+                _emptied([pocket_id])
         return {"pocket": pocket_id, "full": body.full, "changed": changed}
 
     @app.post("/api/tray/fill")
@@ -323,12 +356,19 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         tray = _tray()
         if body.sku is not None and body.sku not in {t.sku for t in tray.types}:
             raise HTTPException(404, f"no tray item {body.sku}")
-        n = shelf.set_all(body.full, body.sku, only=set(tray.layout().slots()))
+        locked = store.locked_slots()  # units of an order being packed: left alone
+        pockets = set(tray.layout().slots()) - locked
+        before = shelf.full_slots()
+        n = shelf.set_all(body.full, body.sku, only=pockets)
         what = catalog.products.get(body.sku, body.sku) if body.sku else "all"
         if n:
             events.record("order", f"Tray: {n} {what} pockets marked {'full' if body.full else 'empty'}",
                           sku=body.sku, full=body.full, changed=n)
-        return {"changed": n}
+            if body.full:
+                _refill_reservations()
+            else:
+                _emptied(sorted(before - shelf.full_slots()))
+        return {"changed": n, "locked": sorted(locked)}
 
     # ---------------- arm (live 3D view) + tray calibration
     from ..tray.calibration import CalibrationError

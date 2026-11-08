@@ -137,6 +137,12 @@ pre { margin: 0; padding: 8px 10px; background: var(--panel); border-radius: 3px
 .traymap .pocket:hover .hit, .traymap .pocket:focus-visible .hit { fill: rgba(62, 92, 118, .14); }
 .traymap .pocket:focus-visible .hit { stroke: var(--steel); stroke-width: 1; }
 .traymap .pocket.pending { opacity: .55; }
+.traymap .res-ring { fill: none; stroke: var(--ink); stroke-width: .9; }
+.traymap .pocket.locked { cursor: not-allowed; }
+.traymap .pocket.locked .res-ring { stroke: var(--safety); stroke-width: 1.4; }
+.slots { font-size: .8rem; margin-top: 2px; }
+.slots.short { color: var(--alarm); font-weight: 600; }
+.traymap .res-tag { font: 700 5px var(--text); fill: var(--ink); pointer-events: none; }
 .arm-side { text-align: center; margin: 2px 0 0; font: 600 .85rem var(--sign); letter-spacing: .04em; text-transform: uppercase; }
 .tray-items td { padding-top: 7px; padding-bottom: 7px; vertical-align: middle; }
 .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; vertical-align: -1px; }

@@ -14,6 +14,7 @@ export interface Order {
   error?: string | null;
   created_at: string;
   [k: string]: unknown;
+  slots?: (string | null)[]; // reserved unit per item (null = short)
 }
 
 export type RobotInfo =
@@ -70,6 +71,8 @@ export interface Pocket {
   yaw_deg: number;
   shape: PocketShape;
   full: boolean;
+  reserved_by?: number | null; // order holding this unit
+  locked?: boolean; // its order is being packed: can't be changed
   robot_m?: Vec3;
 }
 

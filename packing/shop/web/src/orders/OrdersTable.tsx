@@ -73,7 +73,15 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
                 <tr key={o.id}>
                   <td className="num">{o.id}</td>
                   <td>{o.customer_name || "—"}</td>
-                  <td>{o.items_text}</td>
+                  <td>{o.items_text}
+                    {!!o.slots?.length && ["queued", "ready", "packing", "failed"].includes(o.status) && (
+                      <div className={`slots sub${o.slots.includes(null) ? " short" : ""}`}>
+                        {o.slots.includes(null)
+                          ? `Short: ${o.slots.filter((x) => x === null).length} item(s) have no unit in stock`
+                          : `Reserved: ${o.slots.join(", ")}`}
+                      </div>
+                    )}
+                  </td>
                   <td><span className={`status ${o.status}`} title={o.error || ""}>{WORDS[o.status] || o.status}</span></td>
                   <td className="sub placed">{new Date(o.created_at).toLocaleTimeString([], { hour12: false })}</td>
                   <td className="btns">

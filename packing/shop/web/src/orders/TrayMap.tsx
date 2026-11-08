@@ -10,6 +10,7 @@ function PocketMark({ p, color, pending, onToggle }: {
 }) {
   const s = p.shape;
   const fill = p.full ? color : "var(--surface)";
+  const res = p.reserved_by ?? null;
   const common = { fill, stroke: color, strokeWidth: 1.2 };
   let mark, hit;
   if (s.kind === "circle") {
@@ -31,15 +32,32 @@ function PocketMark({ p, color, pending, onToggle }: {
     );
     hit = <circle r={7} />;
   }
+  const state = `${p.full ? "full" : "empty"}${res != null ? `, reserved for order ${res}` : ""}`;
+  const tip = p.locked ? `${p.id}: ${state} — locked while order ${res} is being packed`
+    : `${p.id}: ${state} (click to mark ${p.full ? "empty" : "full"})`;
+  const act = () => { if (!p.locked) onToggle(); };
+  const r = s.kind === "rect" ? Math.max(s.w, s.h) / 2 : s.kind === "circle" ? s.d / 2 : 6;
   return (
-    <g className={`pocket${pending ? " pending" : ""}`} transform={`translate(${p.x} ${p.y}) rotate(${p.yaw_deg})`}
-       role="button" tabIndex={0} aria-pressed={p.full}
-       aria-label={`Pocket ${p.id}, ${p.full ? "full" : "empty"}. Toggle.`}
-       onClick={onToggle}
-       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}>
-      <title>{`${p.id}: ${p.full ? "full" : "empty"} (click to mark ${p.full ? "empty" : "full"})`}</title>
-      <g className="hit">{hit}</g>
-      {mark}
+    <g className={`pocket${pending ? " pending" : ""}${res != null ? " reserved" : ""}${p.locked ? " locked" : ""}`}
+       transform={`translate(${p.x} ${p.y})`}
+       role="button" tabIndex={0} aria-pressed={p.full} aria-disabled={p.locked || undefined}
+       aria-label={`Pocket ${p.id}, ${state}.${p.locked ? " Locked." : " Toggle."}`}
+       onClick={act}
+       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } }}>
+      <title>{tip}</title>
+      <g transform={`rotate(${p.yaw_deg})`}>
+        <g className="hit">{hit}</g>
+        {mark}
+        {res != null && s.kind !== "rect" && <circle className="res-ring" r={r + 1.6} />}
+        {res != null && s.kind === "rect" && (
+          <rect className="res-ring" x={-s.w / 2 - 1.6} y={-s.h / 2 - 1.6} width={s.w + 3.2} height={s.h + 3.2} rx={1.5} />
+        )}
+      </g>
+      {res != null && (
+        <text className="res-tag" transform={`translate(${s.kind === "rect" ? s.w / 2 + 3 : r + 2.5} ${r * 0.2}) scale(1 -1)`}>
+          {p.locked ? "🔒" : ""}#{res}
+        </text>
+      )}
     </g>
   );
 }
@@ -93,12 +111,14 @@ export default function TrayMap({ trayLoad }: { trayLoad: TrayLoad }) {
   const w = o.xmax - o.xmin, h = o.ymax - o.ymin;
   const shown = tray.pockets.map((p) => (p.id in pending ? { ...p, full: pending[p.id] } : p));
   const total = shown.filter((p) => p.full).length;
+  const reservedN = shown.filter((p) => p.reserved_by != null).length;
 
   return (
     <section aria-labelledby="tray-h">
       <header>
         <h2 id="tray-h">Parts tray</h2>
-        <span className="sub">{total} of {shown.length} pockets full. Click a pocket to toggle it.</span>
+        <span className="sub">{total} of {shown.length} pockets full{reservedN ? `, ${reservedN} reserved (#order)` : ""}.
+          Click a pocket to toggle it.</span>
       </header>
       <div className="traymap">
         <svg viewBox={`${o.xmin - m} ${-(o.ymax + m)} ${w + 2 * m} ${h + 2 * m}`} role="group" aria-label="Parts tray map">
@@ -118,10 +138,11 @@ export default function TrayMap({ trayLoad }: { trayLoad: TrayLoad }) {
           {tray.types.map((t) => {
             const mine = shown.filter((p) => p.sku === t.sku);
             const n = mine.filter((p) => p.full).length;
+            const resv = mine.filter((p) => p.reserved_by != null).length;
             return (
               <tr key={t.sku}>
                 <td><span className="swatch" style={{ background: colors[t.sku] }} /> <strong>{t.name}</strong></td>
-                <td className="sub">{n} of {mine.length} full</td>
+                <td className="sub">{n} of {mine.length} full{resv ? ` · ${resv} reserved · ${n - resv} free` : ""}</td>
                 <td className="btns">
                   <button className="act" disabled={busySku !== null || n === mine.length} onClick={() => fill(true, t.sku)}>Fill all</button>
                   <button className="del" disabled={busySku !== null || n === 0} onClick={() => fill(false, t.sku)}>Empty all</button>

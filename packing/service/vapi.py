@@ -25,6 +25,8 @@ class Catalog:
     products: dict[str, str]  # sku -> spoken name
     max_items: int  # items per order (cfg.max_items_per_order)
     available: Callable[[], dict[str, int]] = field(default=lambda: {})  # sku -> parts on the shelf
+    # sku -> [slots holding an available unit, preferred first]; set = orders reserve specific units
+    stock: Callable[[], dict[str, list[str]]] | None = None
 
     def resolve(self, ref: str) -> str:
         r = str(ref).strip().lower()
@@ -174,7 +176,8 @@ class ToolHandler:
         short = [f"{self.catalog.products[s]} (only {stock.get(s, 0)} left)" for s, n in need.items() if n > stock.get(s, 0)]
         if short:
             raise OrderError("Sorry, not enough stock: " + ", ".join(short) + ".")
-        order, created = self.store.create(phone, skus, args.get("customer_name"), "vapi", call_id, tool_call_id)
+        order, created = self.store.create(phone, skus, args.get("customer_name"), "vapi", call_id, tool_call_id,
+                                           stock=self.catalog.stock)
         if created:
             self.on_new_order()
         return self._placed_text(order)

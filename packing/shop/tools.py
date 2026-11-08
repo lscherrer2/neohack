@@ -45,7 +45,8 @@ class ShopTools:
         short = [f"{self.catalog.products[s]} (only {stock.get(s, 0)} left)" for s, n in need.items() if n > stock.get(s, 0)]
         if short:
             raise OrderError("Sorry, not enough stock: " + ", ".join(short) + ".")
-        order, _ = self.store.create(normalize_phone(phone) if phone else "", skus, customer_name.strip(), source)
+        order, _ = self.store.create(normalize_phone(phone) if phone else "", skus, customer_name.strip(), source,
+                                     stock=self.catalog.stock)  # reserves specific units (atomic re-check)
         pos = self.store.queue_position(order.id)
         return order, (f"Order number {order.id} for {order.customer_name} is placed: {self.catalog.describe(order.items)}. "
                 f"It's number {pos} in line.")

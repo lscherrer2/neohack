@@ -6,6 +6,7 @@ the dashboard and the robot agent thread all read stock.
 
 from __future__ import annotations
 
+import re
 import time
 
 from ..cell.inventory import Inventory
@@ -38,6 +39,23 @@ class Shelf:
     def full_slots(self) -> set[str]:
         return self._inv().full_slots() & set(self.slots)
 
+    def stock(self) -> dict[str, list[str]]:
+        """sku -> slots holding an available unit, lowest-numbered first (aa_1 before aa_2 before aa_10:
+        row 1 is nearest the arm). Orders reserve from these (OrderStore.create(stock=...))."""
+        out: dict[str, list[str]] = {}
+        for loc in self.full_slots():
+            out.setdefault(self.slots[loc], []).append(loc)
+        return {sku: sorted(locs, key=_slot_order) for sku, locs in out.items()}
+
+    def consume_slots(self, slots: list[str]) -> None:
+        """Mark the unit in each slot as used (simulated packing of reserved units)."""
+        inv = self._inv()
+        for loc in slots:
+            part = inv.available_part(loc)
+            if part is None:
+                raise RuntimeError(f"nothing left in {loc}")
+            inv.set_part(part.id, "packed")
+
     def set_slot(self, location: str, full: bool) -> bool:
         """A human marks one slot full/empty. KeyError for an unknown slot."""
         return self._inv().set_slot(location, self.slots[location], full)
@@ -66,5 +84,13 @@ class ShelfSimPacker:
 
     def pack(self, order: Order) -> str:
         time.sleep(self.seconds_per_item * len(order.items))
-        self.shelf.consume(order.items)
+        if order.slots and all(order.slots):  # the units reserved for this order
+            self.shelf.consume_slots(order.slots)
+        else:  # no / incomplete reservation (e.g. an old order): any available units
+            self.shelf.consume(order.items)
         return f"SIM-BOX-{order.id}"
+
+
+def _slot_order(loc: str) -> tuple:
+    m = re.match(r"(.*?)(\d+)$", loc)
+    return (m.group(1), int(m.group(2))) if m else (loc, 0)

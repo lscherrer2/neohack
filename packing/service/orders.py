@@ -12,7 +12,8 @@ import json
 import re
 import sqlite3
 import threading
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,7 +36,28 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS orders_status ON orders(status, id);
+
+-- Per-unit stock reservations: each item of an open order owns one specific unit (tray pocket / part slot).
+-- slot NULL = short (no free unit right now). UNIQUE(slot): a unit belongs to at most one order.
+CREATE TABLE IF NOT EXISTS reservations (
+    order_id INTEGER NOT NULL,
+    item INTEGER NOT NULL,            -- index into the order's items
+    sku TEXT NOT NULL,
+    slot TEXT UNIQUE,
+    PRIMARY KEY (order_id, item)
+);
+-- Released / consumed automatically when an order leaves the open states or is deleted.
+CREATE TRIGGER IF NOT EXISTS reservations_release AFTER UPDATE OF status ON orders
+    WHEN NEW.status NOT IN ('queued', 'ready', 'packing', 'failed')
+    BEGIN DELETE FROM reservations WHERE order_id = NEW.id; END;
+CREATE TRIGGER IF NOT EXISTS reservations_delete AFTER DELETE ON orders
+    BEGIN DELETE FROM reservations WHERE order_id = OLD.id; END;
 """
+
+OPEN = ("queued", "ready", "packing", "failed")  # orders that hold reservations
+
+# stock() -> {sku: [slots holding an available unit, preferred first]}
+Stock = Callable[[], dict[str, list[str]]]
 
 
 class OrderError(ValueError):
@@ -57,6 +79,7 @@ class Order:
     error: str | None
     created_at: str
     updated_at: str
+    slots: list[str | None] = field(default_factory=list)  # reserved unit per item (None = short); [] = none
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -92,22 +115,102 @@ class OrderStore:
     def _row(self, r: sqlite3.Row) -> Order:
         d = dict(r)
         d["items"] = json.loads(d["items"])
+        rows = self.db.execute("SELECT item, slot FROM reservations WHERE order_id=? ORDER BY item", (d["id"],))
+        d["slots"] = [x["slot"] for x in rows]
         return Order(**d)
 
     def create(self, phone: str, items: list[str], customer_name: str | None = None, source: str = "api",
-               vapi_call_id: str | None = None, tool_call_id: str | None = None) -> tuple[Order, bool]:
-        """Returns (order, created). If tool_call_id was seen before, returns that order, created=False."""
+               vapi_call_id: str | None = None, tool_call_id: str | None = None,
+               stock: Stock | None = None) -> tuple[Order, bool]:
+        """Returns (order, created). If tool_call_id was seen before, returns that order, created=False.
+        `stock`: reserve one specific unit per item (lowest-numbered free first), all or nothing — OrderError
+        "not enough stock" if any item has no free unit. Atomic across threads and processes."""
         with self.lock:
             if tool_call_id:
                 r = self.db.execute("SELECT * FROM orders WHERE tool_call_id=?", (tool_call_id,)).fetchone()
                 if r:
                     return self._row(r), False
             now = _now()
-            cur = self.db.execute(
-                "INSERT INTO orders (customer_name, phone, items, status, source, vapi_call_id, tool_call_id,"
-                " created_at, updated_at) VALUES (?,?,?, 'queued', ?,?,?,?,?)",
-                (customer_name, phone, json.dumps(items), source, vapi_call_id, tool_call_id, now, now))
+            self.db.execute("BEGIN IMMEDIATE")  # also locks out other processes until COMMIT
+            try:
+                slots = self._allocate(items, stock()) if stock else None
+                cur = self.db.execute(
+                    "INSERT INTO orders (customer_name, phone, items, status, source, vapi_call_id, tool_call_id,"
+                    " created_at, updated_at) VALUES (?,?,?, 'queued', ?,?,?,?,?)",
+                    (customer_name, phone, json.dumps(items), source, vapi_call_id, tool_call_id, now, now))
+                if slots is not None:
+                    self.db.executemany("INSERT INTO reservations (order_id, item, sku, slot) VALUES (?,?,?,?)",
+                                        [(cur.lastrowid, i, sku, slot) for i, (sku, slot) in enumerate(zip(items, slots))])
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
             return self.get(cur.lastrowid), True
+
+    # ---------- per-unit reservations ----------
+    def _taken(self) -> set[str]:
+        return {r["slot"] for r in self.db.execute("SELECT slot FROM reservations WHERE slot IS NOT NULL")}
+
+    def _allocate(self, items: list[str], stock: dict[str, list[str]]) -> list[str]:
+        """One free unit per item, preferred first. OrderError (speakable) listing what's short."""
+        taken, out, short = self._taken(), [], {}
+        for sku in items:
+            slot = next((s for s in stock.get(sku, []) if s not in taken), None)
+            if slot is None:
+                short[sku] = short.get(sku, 0) + 1
+            else:
+                taken.add(slot)
+                out.append(slot)
+        if short:
+            free = {sku: sum(s not in self._taken() for s in stock.get(sku, [])) for sku in short}
+            raise OrderError("Sorry, not enough stock: " + ", ".join(
+                f"{sku} (only {free[sku]} left)" for sku in short) + ".")
+        return out
+
+    def reserved_slots(self) -> dict[str, int]:
+        """slot -> order id, for every reserved unit."""
+        return {r["slot"]: r["order_id"] for r in
+                self.db.execute("SELECT slot, order_id FROM reservations WHERE slot IS NOT NULL")}
+
+    def locked_slots(self) -> set[str]:
+        """Units reserved by an order that is being packed: nobody may change them from the dashboard."""
+        return {r["slot"] for r in self.db.execute(
+            "SELECT r.slot FROM reservations r JOIN orders o ON o.id = r.order_id"
+            " WHERE o.status = 'packing' AND r.slot IS NOT NULL")}
+
+    def release_slot(self, slot: str, stock: dict[str, list[str]]) -> int | None:
+        """A unit is gone (marked empty): move its reservation to another free unit of the same sku, or make
+        that item short. Returns the affected order id (None if the unit wasn't reserved)."""
+        with self.lock:
+            r = self.db.execute("SELECT order_id, item, sku FROM reservations WHERE slot=?", (slot,)).fetchone()
+            if not r:
+                return None
+            taken = self._taken() - {slot}
+            new = next((s for s in stock.get(r["sku"], []) if s not in taken and s != slot), None)
+            self.db.execute("UPDATE reservations SET slot=? WHERE order_id=? AND item=?", (new, r["order_id"], r["item"]))
+            return r["order_id"]
+
+    def fill_short(self, stock: dict[str, list[str]]) -> list[int]:
+        """Give short items (slot NULL) a free unit where possible, oldest order first; also backfills open
+        orders that have no reservation rows yet (made before reservations existed). Returns order ids changed."""
+        changed: list[int] = []
+        with self.lock:
+            ph = ",".join("?" * len(OPEN))
+            for o in self.db.execute(f"SELECT id, items FROM orders WHERE status IN ({ph}) AND id NOT IN"
+                                     " (SELECT order_id FROM reservations) ORDER BY id", OPEN).fetchall():
+                self.db.executemany("INSERT INTO reservations (order_id, item, sku, slot) VALUES (?,?,?,NULL)",
+                                    [(o["id"], i, sku) for i, sku in enumerate(json.loads(o["items"]))])
+            taken = self._taken()
+            for r in self.db.execute("SELECT order_id, item, sku FROM reservations WHERE slot IS NULL"
+                                     " ORDER BY order_id, item").fetchall():
+                new = next((s for s in stock.get(r["sku"], []) if s not in taken), None)
+                if new:
+                    taken.add(new)
+                    self.db.execute("UPDATE reservations SET slot=? WHERE order_id=? AND item=?",
+                                    (new, r["order_id"], r["item"]))
+                    if r["order_id"] not in changed:
+                        changed.append(r["order_id"])
+        return changed
 
     def by_tool_call(self, tool_call_id: str | None) -> Order | None:
         if not tool_call_id:
@@ -137,7 +240,7 @@ class OrderStore:
                                (order_id,)).fetchone()[0]
 
     def reserved(self) -> dict[str, int]:
-        """SKU counts in orders not yet packed (queued or packing)."""
+        """SKU counts in orders not yet packed (queued, ready or packing) — reserved units plus short ones."""
         out: dict[str, int] = {}
         for r in self.db.execute("SELECT items FROM orders WHERE status IN ('queued','ready','packing')"):
             for sku in json.loads(r["items"]):
