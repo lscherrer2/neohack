@@ -25,7 +25,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from ..config import CellConfig, load_config
 from ..hardware.arm import FakeArm, RealArm
 from ..motion.controller import Motion
-from ..motion.kinematics import ArmModel, gravity_feedforward, load_ranges
+from ..motion.kinematics import gravity_feedforward
 from ..poses import PoseStore
 from .cameras import CameraSpec, RealCameras, SchematicCamera
 from .jog import DIRECTIONS, Jogger, JogResult
@@ -87,7 +87,7 @@ class RemoteRig:
         if self.jogger is not None:
             return self.jogger
         cfg = self.cfg
-        model = ArmModel(load_ranges(cfg.robot_id))
+        model = cfg.arm_model()
         if self.sim:
             self.arm = FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open)
             self.cameras = SchematicCamera(model, self.settings.limits)

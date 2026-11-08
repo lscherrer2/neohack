@@ -27,7 +27,7 @@ from .config import CellConfig, load_config
 from .hardware.arm import Arm, FakeArm, RealArm
 from .joints import BODY
 from .motion.controller import Motion, MotionError
-from .motion.kinematics import ArmModel, PathError, gravity_feedforward, load_ranges
+from .motion.kinematics import ArmModel, PathError, gravity_feedforward
 from .poses import PoseNotTaughtError, PoseStore
 
 PACKING_DIR = Path(__file__).parent
@@ -378,7 +378,7 @@ def _build_rig(s: Session, arm: Arm) -> Rig:
 
 def _load_arm_model(cfg: CellConfig) -> ArmModel:
     try:
-        return ArmModel(load_ranges(cfg.robot_id))
+        return cfg.arm_model()
     except ImportError as e:
         raise CellError("straight-line moves need placo: pip install -r requirements.txt") from e
 

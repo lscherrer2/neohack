@@ -4,7 +4,7 @@ import { useMemo, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import { itemColor } from "../api";
 import type { PlannedPath } from "../arm/plannedPath";
-import type { ArmState, BoxesState, BoxInfo, CalSession, Mat4, Pocket, TrayState, Vec3 } from "../types";
+import type { ArmState, BoxesState, BoxInfo, CalSession, DeskPlaneInfo, Mat4, Pocket, TrayState, Vec3 } from "../types";
 
 // Robot base frame: x forward, y left, z up, meters. three.js is y-up, so everything robot-side lives
 // in <RobotFrame>, rotated -90° about x: robot (x, y, z) -> three (x, z, -y).
@@ -334,9 +334,31 @@ function LabelProjector({ labels, els }: { labels: Label[]; els: RefObject<Map<s
   return null;
 }
 
-export default function Scene({ arm, stale, tray, session, highlighted, boxes = null, planned = null, deskPoints = [] }: {
+/** The saved desk plane as a translucent patch over the touched points (+5 cm), so a tilt is visible. */
+function DeskPatch({ plane }: { plane: DeskPlaneInfo }) {
+  const geom = useMemo(() => {
+    const xs = plane.points.map((p) => p[0]), ys = plane.points.map((p) => p[1]);
+    const pad = 0.05;
+    const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+    const z = (x: number, y: number) => plane.a * x + plane.b * y + plane.c;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(
+      [x0, y0, z(x0, y0), x1, y0, z(x1, y0), x1, y1, z(x1, y1), x0, y1, z(x0, y1)], 3));
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    return g;
+  }, [plane]);
+  if (plane.points.length < 3) return null;
+  return (
+    <mesh geometry={geom}>
+      <meshBasicMaterial color="#7A5A00" transparent opacity={0.15} side={THREE.DoubleSide} depthWrite={false} />
+    </mesh>
+  );
+}
+
+export default function Scene({ arm, stale, tray, session, highlighted, boxes = null, planned = null, deskPoints = [],
+  deskPlane = null }: {
   arm: ArmState | null; stale: boolean; tray: TrayState | null; session: CalSession | null; highlighted: string | null;
-  boxes?: BoxesState | null; planned?: PlannedPath | null; deskPoints?: Vec3[];
+  boxes?: BoxesState | null; planned?: PlannedPath | null; deskPoints?: Vec3[]; deskPlane?: DeskPlaneInfo | null;
 }) {
   const fitMatrix = session?.active && session.fit?.matrix ? session.fit.matrix : null;
   const trayMatrix = tray ? tray.calibration?.matrix ?? defaultTrayMatrix(tray.outline) : null;
@@ -385,6 +407,7 @@ export default function Scene({ arm, stale, tray, session, highlighted, boxes = 
         {tray && fitMatrix && <FitOutline tray={tray} matrix={fitMatrix} />}
         {boxes && <PackSpot xy={boxes.pack_spot_mm} g={boxes.geometry} />}
         {planned && <PlannedPathView path={planned} />}
+        {deskPlane && <DeskPatch plane={deskPlane} />}
         {deskPoints.map((p, i) => (
           <mesh key={`desk${i}`} position={p} rotation={[Math.PI / 2, 0, 0]}>
             <cylinderGeometry args={[0.006, 0.006, 0.002, 18]} />

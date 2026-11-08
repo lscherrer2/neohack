@@ -172,9 +172,10 @@ export interface BoxInfo {
   location: "supply" | "pack" | "output";
   order_id: number | null;
   pose?: Mat4; // box frame at its current location: origin bottom center, z up, tab along -y (robot frame, m)
-  report: { tilt_deg?: number; bottom_mm?: number };
+  report: { tilt_deg?: number; bottom_mm?: number; above_desk_mm?: number };
   fixed_jaw_calibrated?: "top" | "bottom"; // where the fixed jaw was when calibrated
   fixed_jaw_used?: "top" | "bottom"; // where planning puts it (boxes.fixed_jaw)
+  desk_mm?: { pack?: number; output?: number }; // height change vs the calibrated spot from the desk plane ({} = none)
   created_at: string;
 }
 
@@ -186,4 +187,28 @@ export interface BoxesState {
 
 // ---------- desk plane (GET /api/desk)
 export interface DeskPlaneInfo { a: number; b: number; c: number; points: Vec3[]; rms_mm: number; created: string; tilt_deg: number }
-export interface DeskState { points: Vec3[]; fit: DeskPlaneInfo | null; fit_error: string | null; saved: DeskPlaneInfo | null }
+export interface DeskState {
+  points: Vec3[]; fit: DeskPlaneInfo | null; fit_error: string | null;
+  saved: (DeskPlaneInfo & { has_poses?: boolean }) | null;
+  joint_offsets?: { offsets_deg: Record<string, number>; file: string | null };
+  offset_fit?: OffsetFit; // POST /api/joint-offsets/fit|apply
+  notes?: string[]; // after apply / remove: what couldn't be re-derived (e.g. re-calibrate the tray)
+}
+
+// ---------- joint zero offsets fitted from desk touches (POST /api/joint-offsets/fit)
+export interface OffsetFit {
+  joints: string[];
+  delta_deg: Record<string, number>;
+  std_deg: Record<string, number>;
+  current_deg: Record<string, number>;
+  total_deg: Record<string, number>;
+  rms_before_mm: number;
+  rms_after_mm: number;
+  tilt_before_deg: number;
+  tilt_after_deg: number;
+  points: { r_mm: number; az_deg: number; before_mm: number; after_mm: number }[]; // sorted by distance
+  ok: boolean;
+  problems: string[];
+  note: string;
+  source: string;
+}

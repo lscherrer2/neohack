@@ -58,6 +58,13 @@ def load_ranges(robot_id: str) -> dict[str, tuple[int, int, int]]:
     return {j: (cal[j].range_min, cal[j].range_max, cal[j].drive_mode) for j in BODY}
 
 
+def arm_model(robot_id: str, offsets_file: str | Path | None = None) -> ArmModel:
+    """The arm's model: calibration ranges + the joint zero offsets saved by the desk-touch fit (if any)."""
+    from .joint_offsets import load_offsets
+
+    return ArmModel(load_ranges(robot_id), offsets_deg=load_offsets(offsets_file))
+
+
 def gravity_feedforward(robot_id: str, gain: float):
     """Callable pose -> per-joint command offset (units) that cancels gravity sag, or None if gain is 0.
     The servos are P-only, so a joint droops ~ torque / stiffness; measured Nov 2026 along the push path:
@@ -146,8 +153,10 @@ def _slerp(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
 class ArmModel:
     """SO-101 forward/inverse kinematics in calibrated joint units, plus straight-line path planning."""
 
-    def __init__(self, ranges: dict[str, tuple[int, ...]], urdf: Path = URDF):
-        """ranges: joint -> (range_min, range_max[, drive_mode]) raw servo ticks (see load_ranges)."""
+    def __init__(self, ranges: dict[str, tuple[int, ...]], urdf: Path = URDF, offsets_deg: dict[str, float] | None = None):
+        """ranges: joint -> (range_min, range_max[, drive_mode]) raw servo ticks (see load_ranges).
+        offsets_deg: joint -> degrees added to its URDF angle (kinematic zero correction from the desk-touch fit,
+        packing/motion/joint_offsets.py). FK and IK both use it; units / taught poses are unaffected."""
         self.kin = PlacoKinematics(str(urdf), "gripper_frame_link", list(BODY))
         lo = np.array([ranges[j][0] for j in BODY], float)
         hi = np.array([ranges[j][1] for j in BODY], float)
@@ -156,6 +165,8 @@ class ArmModel:
         # units already carry the drive-mode sign (SO101.to_units), so only the zero offset needs it
         self.scale = (hi - lo) / 2 * 360 / MAX_RES / 100  # degrees per calibrated unit
         self.zero_deg = sign * ((lo + hi) / 2 - HALF_TURN) * 360 / MAX_RES  # URDF angle at unit 0
+        self.offsets_deg = {j: float(v) for j, v in (offsets_deg or {}).items() if j in BODY and v}
+        self.zero_deg = self.zero_deg + np.array([self.offsets_deg.get(j, 0.0) for j in BODY])
 
         # pan axis position (world xy), for azimuth of a point around the base
         self.kin.forward_kinematics(np.zeros(len(BODY)))

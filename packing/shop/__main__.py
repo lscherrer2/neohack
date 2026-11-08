@@ -40,11 +40,10 @@ def load(args):
 def make_hub(args, cfg, own_arm: bool):
     """ArmHub for the server. own_arm=False: the arm lives in another process (telemetry only)."""
     from ..hardware.arm import FakeArm, RealArm
-    from ..motion.kinematics import ArmModel, load_ranges
     from .arm_hub import ArmHub
 
-    def model():
-        return ArmModel(load_ranges(cfg.robot_id))
+    def model():  # re-reads the joint offsets file (ArmHub.reload_model after a fit is applied)
+        return cfg.arm_model()
 
     if not own_arm:
         return ArmHub(None, "remote", model)
@@ -58,6 +57,8 @@ def make_hub(args, cfg, own_arm: bool):
         cfg.tray.calibration_file = cfg.tray.calibration_file.with_name("sim_" + cfg.tray.calibration_file.name)
     if cfg.desk_file:  # nor the real desk calibration
         cfg.desk_file = cfg.desk_file.with_name("sim_" + cfg.desk_file.name)
+    if cfg.joint_offsets_file:  # nor the real arm's joint offsets (those live in calibration/)
+        cfg.joint_offsets_file = cfg.desk_file.with_name("sim_joint_offsets.json") if cfg.desk_file else None
     return ArmHub(lambda: FakeArm(closed=cfg.gripper.closed, opened=cfg.gripper.open), "sim", model)
 
 

@@ -59,6 +59,21 @@ this document says what floor calibration should do, what exists, and what is st
 | UI | Calibration tab → **Desk** section (`web/src/calibration/DeskBox.tsx`): instructions, Capture point N, point list with ×, live fit, Save desk, Clear points, Remove calibration. Touched/saved points drawn as small discs in the 3D view (`Scene.tsx`, `deskPoints`) |
 | Tests | `packing/tests/test_desk.py`: tilt recovery, refusals (too few / collinear / bunched / bumpy), relative heights, box spots following a tilted desk, API capture → fit → save → remove |
 
+**Second pass (2026-11-07, sim-tested, not run on hardware)** — the plane is now also used as the floor:
+
+| Piece | Where |
+|---|---|
+| Touches record the **jaw tip** (tool point + `JAW_TIP_M` 6 mm along the tool axis, `touch_point`), so the plane is the desk surface itself | `desk.py`, `ArmHub.read_tool()`, `POST /api/desk/capture` |
+| Box capture check: box bottom within 20 mm of `plane(xy)` (not z = 0); report gets `above_desk_mm` | `geometry.box_from_grasp(..., desk=)`, `POST /api/boxes/capture` |
+| Tray stand block goes down to the lowest desk point under the tray | `geometry.tray_blocks(tray_cfg, desk)`, `obstacles()` reads the saved plane |
+| Desk collisions: every pose of a plan (joint moves interpolated, lines/paths) keeps the jaw tip ≥ desk + `TIP_CLEAR_M` (0) and the arm center line shoulder..wrist ≥ desk + `LINK_CLEAR_M` (15 mm); carried box corners ≥ desk + `BOX_CLEAR_M` (5 mm) | `desk.check_desk_clear`, `desk.box_below_desk`; used by `plan_box_move` (+ `check_path`), `plan_pack_order` (picks + drops), `POST /api/arm/pick`, `POST /api/arm/goto` |
+| Per-spot corrections: `desk_mm: {pack, output}` per box in `GET /api/boxes`, shown in the Boxes list | `desk.corrections_mm`, `BoxesBox.tsx` |
+| Saved plane drawn as a translucent patch over the touched points (+5 cm) | `Scene.tsx` `DeskPatch` |
+
+No desk calibration = none of the above applies (old behavior exactly). Real tray check: its lowest pockets sit
+~50 mm above z = 0, so the desk checks shouldn't refuse real picks; the sim tray in the tests reaches below z = 0, so
+sim tests that save a desk put it under the tray.
+
 Touched points are kept **in server memory** until saved (a restart drops unsaved points — same as the tray session).
 
 ## 4. Still open (suggested next steps, in order)
@@ -66,11 +81,13 @@ Touched points are kept **in server memory** until saved (a restart drops unsave
 1. **Hardware run**: calibrate the floor (4–6 points spanning left/middle/right), check the reported tilt, then repeat a
    left → middle → left box move and compare the approach heights. If the tilt is ~0 and the heights still differ,
    the cause is sag / reach precision, not the floor (see 5).
-2. **Use the plane for the box capture check**: `boxes/geometry.box_from_grasp` refuses a capture if the box bottom
+Items 2, 3, 4 and 7 are done (second pass above); 6 is partly open (`remote.min_z_m` still z = 0).
+
+2. ~~**Use the plane for the box capture check**~~: `boxes/geometry.box_from_grasp` refuses a capture if the box bottom
    is > 20 mm from z = 0. It should compare with `plane(xy)` (minus the jaw-tip offset, or relative to other boxes).
-3. **Use the plane in the tray "stand" obstacle**: `geometry.tray_blocks` extends the tray's stand block down to
+3. ~~**Use the plane in the tray "stand" obstacle**~~: `geometry.tray_blocks` extends the tray's stand block down to
    z = 0; it should go down to the floor plane under the tray.
-4. **Arm/box vs floor collision**: the 3D checks (`move.check_path`, `check_arm_clear`) know boxes and the tray but not
+4. ~~**Arm/box vs floor collision**~~: the 3D checks (`move.check_path`, `check_arm_clear`) know boxes and the tray but not
    the desk. Add "no arm point / carried box corner below `plane(xy)` + margin" (the carry already never dips below its
    lifted height, but free moves and picks aren't checked against the desk).
 5. **If sag turns out to be the cause** (heights still off with a flat floor): add the box's weight to the gravity
@@ -78,10 +95,14 @@ Touched points are kept **in server memory** until saved (a restart drops unsave
    configurable `boxes` height offset for the grip/set-down (the user accepts a few mm of play).
 6. Other z = 0 assumptions worth moving to the plane: `remote.min_z_m` (LLM contingency safe box), the pick's lift
    checks, the `CLAUDE.md` note "jaw resting on the table reads z ≈ +5…+10 mm".
-7. Optional UI: draw the fitted plane (a translucent patch) and show per-spot height corrections (e.g. "pack spot
+7. ~~Optional UI~~ (done): draw the fitted plane (a translucent patch) and show per-spot height corrections (e.g. "pack spot
    −3.2 mm, box 1 output +1.1 mm") in the Boxes list.
 8. Optional: tilt "straight up/down" box lifts along the plane normal instead of the base z — only matters for large
    tilts (> ~2°).
+
+**Update 2026-11-07 (after the hardware run):** with 7 touches the user saw the points (motors off — no sag) right on
+the desk near the arm and higher and higher further out, the same left and right: a lift/elbow zero error, not a
+desk tilt. Fix: `.claude/plans/joint_offset_fit.md` (joint angle fit from the same touches).
 
 ## 5. Acceptance (hardware)
 

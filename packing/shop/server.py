@@ -502,6 +502,12 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409, "calibrate the tray first (or capture enough points for a good live fit)")
         return cal, "saved calibration"
 
+    from ..boxes.desk import check_desk_clear
+
+    def _desk_plane():
+        """The calibrated desk plane (None if not calibrated / no cell config): planned moves stay above it."""
+        return shelf.cfg.desk_plane() if shelf is not None else None
+
     @app.post("/api/arm/goto")
     def arm_goto(body: GotoIn):
         from ..motion.kinematics import PathError
@@ -526,6 +532,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         try:
             with h._lock:
                 plan = plan_goto(h.model, body.point, cal.to_robot(*xy), cal.normal, joints, standoff_mm=body.standoff_mm)
+                check_desk_clear(h.model, joints, plan.steps, _desk_plane(), "go-to")
         except PathError as e:
             raise _plan_failed(f"can't plan that move: {e}", h, joints, e) from e
         out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
@@ -562,6 +569,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         try:
             with h._lock:
                 plan = plan_pocket_pick(h.model, tray, shelf.cfg.gripper, cal, body.pocket, joints)
+                check_desk_clear(h.model, joints, plan.steps, _desk_plane(), f"pick from {body.pocket}")
         except PathError as e:
             raise _plan_failed(f"can't plan that pick: {e}", h, joints, e) from e
         out = {"plan": plan.summary(), "calibration": source, "motors_will_turn_on": not h.torque,
@@ -618,6 +626,8 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     # ---------------- packing boxes (packing/boxes/)
     from ..boxes.geometry import (BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, blocks_intersect, box_block,
                                   box_from_grasp)
+    from ..boxes.desk import corrections_mm
+    from ..boxes.geometry import mirror
     from ..boxes.geometry import obstacles as box_obstacles
     from ..boxes.move import box_pose, plan_box_move, too_close
     from ..boxes.store import BoxError, BoxStore
@@ -647,6 +657,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         h = _hub()
         pan = h.model.pan_xy if h.model is not None else None
         cfg = _box_cfg()
+        desk = cfg.desk_plane()
         listed = []
         for b in boxes.list():
             d = b.to_dict()
@@ -656,6 +667,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             d["fixed_jaw_used"] = cfg.boxes.fixed_jaw if cfg.boxes.fixed_jaw in ("top", "bottom") else d["fixed_jaw_calibrated"]
             if pan is not None:
                 d["pose"] = box_pose(b, b.location, cfg, pan).round(6).tolist()
+                # height change of the pack / output spot vs the calibrated spot, from the desk plane ({} = none)
+                d["desk_mm"] = corrections_mm(desk, b.supply[:2, 3], {
+                    "pack": np.array(cfg.boxes.pack_spot_mm, float) / 1000, "output": mirror(b.supply, pan)[:2, 3]})
             listed.append(d)
         px, py = cfg.boxes.pack_spot_mm
         return {"boxes": listed, "pack_spot_mm": [px, py],
@@ -680,7 +694,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             with h._lock:
                 T_tool = h.model.fk(body)
             g = GripCfg(from_wall_mm=cfg.boxes.grip_from_wall_mm)
-            T_box, report = box_from_grasp(T_tool, pan, g)
+            T_box, report = box_from_grasp(T_tool, pan, g, desk=cfg.desk_plane())
         except (ArmBusy, CaptureError) as e:
             raise HTTPException(409 if isinstance(e, ArmBusy) else 422, str(e)) from e
         if T_box[1, 3] < pan[1]:
@@ -721,9 +735,18 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         return _boxes_state()
 
     # ---------------- desk plane (packing/boxes/desk.py): box spot heights follow the real desk
-    from ..boxes.desk import DeskError, DeskPlane, fit_plane
+    from ..boxes.desk import DeskError, DeskPlane, fit_plane, touch_point
+    from ..motion.joint_offsets import OffsetFitError, fit_offsets, load_offsets, save_offsets
 
-    desk_points: list[list[float]] = []  # touched, not saved yet (in memory)
+    desk_points: list[dict] = []  # touched, not saved yet (in memory): {"tip": xyz m, "joints": body pose}
+
+    def _tips() -> list[list[float]]:
+        return [p["tip"] for p in desk_points]
+
+    def _offsets_state() -> dict:
+        cfg = _box_cfg()
+        f = cfg.joint_offsets_file
+        return {"offsets_deg": load_offsets(f), "file": str(f) if f else None}
 
     def _desk_state() -> dict:
         cfg = _box_cfg()
@@ -731,10 +754,13 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         fit, err = None, None
         if desk_points:
             try:
-                fit = fit_plane(desk_points).to_dict()
+                fit = fit_plane(_tips()).to_dict()
             except DeskError as e:
                 err = str(e)
-        return {"points": desk_points, "fit": fit, "fit_error": err, "saved": saved.to_dict() if saved else None}
+        return {"points": _tips(), "fit": fit, "fit_error": err,
+                "saved": ({k: v for k, v in saved.to_dict().items() if k != "poses"} | {"has_poses": bool(saved.poses)})
+                if saved else None,
+                "joint_offsets": _offsets_state()}
 
     @app.get("/api/desk")
     def desk_state():
@@ -742,17 +768,18 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
 
     @app.post("/api/desk/capture")
     def desk_capture():
-        """Motors off, closed jaw tip touching the desk: add that point."""
+        """Motors off, closed jaw tip touching the desk: add that point (and its joint pose, for the joint fit)."""
         h = _hub()
         if not h.connected:
             raise HTTPException(409, "connect the arm first")
         if h.torque:
             raise HTTPException(409, "release the motors first (hold the arm), then touch the desk with the jaw tip")
         try:
-            tip = h.read_tip()
+            body, T_tool = h.read_tool()
         except ArmBusy as e:
             raise HTTPException(409, str(e)) from e
-        desk_points.append([round(float(v), 5) for v in tip])
+        tip = touch_point(T_tool)  # the jaw tips (what touches the desk), not the tool point
+        desk_points.append({"tip": [round(float(v), 5) for v in tip], "joints": {j: float(v) for j, v in body.items()}})
         return _desk_state()
 
     @app.delete("/api/desk/points")
@@ -771,7 +798,7 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
     def desk_save():
         cfg = _box_cfg()
         try:
-            plane = fit_plane(desk_points)
+            plane = fit_plane(_tips(), [p["joints"] for p in desk_points])
         except DeskError as e:
             raise HTTPException(422, str(e)) from e
         plane.save(cfg.desk_file)
@@ -787,6 +814,110 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             cfg.desk_file.unlink()
             events.record("robot", "Desk calibration removed (box spots use the calibrated box height again)")
         return _desk_state()
+
+    # ---------------- joint zero offsets from the desk touches (packing/motion/joint_offsets.py)
+    def _touch_poses() -> tuple[list[dict], str]:
+        """Joint poses to fit: the touches in memory, else the saved desk calibration's."""
+        if desk_points:
+            return [p["joints"] for p in desk_points], "touches not saved yet"
+        saved = _box_cfg().desk_plane()
+        if saved and saved.poses:
+            return saved.poses, "the saved desk calibration"
+        raise HTTPException(422, "touch the desk first (Capture point) — the joint fit uses those touches"
+                                 + (" (the saved desk calibration predates joint poses: re-touch it)" if saved else ""))
+
+    def _offset_fit() -> dict:
+        h = _hub()
+        if h.model is None:
+            raise HTTPException(503, "kinematics unavailable (placo not installed?)")
+        poses, source = _touch_poses()
+        try:
+            with h._lock:
+                rep = fit_offsets(h.model, poses)
+        except OffsetFitError as e:
+            raise HTTPException(422, str(e)) from e
+        return rep | {"source": source}
+
+    def _rederive() -> list[str]:
+        """After the kinematics changed: recompute everything touch-calibrated from its stored joints.
+        Returns what couldn't be (shown to the user)."""
+        from ..boxes.geometry import CaptureError as _CaptureError
+
+        h, cfg = _hub(), _box_cfg()
+        h.reload_model()
+        model = h.model
+        notes: list[str] = []
+        if model is None:
+            return ["kinematics unavailable — nothing re-derived"]
+        with h._lock:
+            for p in desk_points:
+                p["tip"] = [round(float(v), 5) for v in touch_point(model.fk(p["joints"]))]
+            saved = cfg.desk_plane()
+            if saved and saved.poses:
+                tips = [touch_point(model.fk(q)) for q in saved.poses]
+                try:
+                    fit_plane(tips, saved.poses).save(cfg.desk_file)
+                except DeskError as e:
+                    notes.append(f"the saved desk calibration no longer fits ({e}) — re-touch the desk")
+            elif saved:
+                notes.append("the saved desk calibration has no joint poses — re-touch the desk and save it")
+            desk = cfg.desk_plane()
+            pan = model.pan_xy
+            g = GripCfg(from_wall_mm=cfg.boxes.grip_from_wall_mm)
+            for b in boxes.list():
+                if not b.joints:
+                    notes.append(f"box {b.id} has no capture joints — remove and re-add it")
+                    continue
+                T_tool = model.fk(b.joints)
+                try:
+                    T_box, _ = box_from_grasp(T_tool, pan, g, desk=desk)
+                except _CaptureError as e:
+                    notes.append(f"box {b.id}: {e} — remove and re-add it")
+                    continue
+                boxes.recalibrate(b.id, T_box, np.linalg.inv(T_box) @ T_tool)
+        if cfg.tray and cfg.tray.calibration() is not None:
+            notes.append("re-calibrate the tray (Calibration tab): its points were measured with the old joint angles")
+        return notes
+
+    def _offsets_changeable():
+        h = _hub()
+        if h.source == "remote":  # the arm (and its model) lives in another process: it wouldn't see the change
+            raise HTTPException(409, "the arm is run by another process here — apply joint corrections from "
+                                     "`python -m packing.shop start` (the process that owns the arm)")
+        if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; wait for it to finish")
+
+    @app.post("/api/joint-offsets/fit")
+    def joint_offsets_fit():
+        """Dry run: the joint angle corrections that make the desk touches flattest (nothing saved)."""
+        return {**_desk_state(), "offset_fit": _offset_fit()}
+
+    @app.post("/api/joint-offsets/apply")
+    def joint_offsets_apply():
+        """Fit again and save the corrected joint offsets; desk points / plane and boxes are re-derived."""
+        _offsets_changeable()
+        rep = _offset_fit()
+        if not rep["ok"]:
+            raise HTTPException(422, "not applied: " + "; ".join(rep["problems"]))
+        cfg = _box_cfg()
+        save_offsets(cfg.joint_offsets_file, rep["total_deg"],
+                     {k: rep[k] for k in ("delta_deg", "std_deg", "rms_before_mm", "rms_after_mm", "source", "note")})
+        notes = _rederive()
+        events.record("robot", "Joint offsets applied: " + ", ".join(f"{j} {v:+.2f}°" for j, v in rep["delta_deg"].items())
+                      + f" (desk touches {rep['rms_before_mm']:.1f} → {rep['rms_after_mm']:.1f} mm RMS)")
+        return {**_desk_state(), "offset_fit": rep, "notes": notes}
+
+    @app.delete("/api/joint-offsets")
+    def joint_offsets_remove():
+        """Back to the plain calibration zero; desk points / plane and boxes are re-derived."""
+        _offsets_changeable()
+        cfg = _box_cfg()
+        notes: list[str] = []
+        if cfg.joint_offsets_file and cfg.joint_offsets_file.exists():
+            cfg.joint_offsets_file.unlink()
+            notes = _rederive()
+            events.record("robot", "Joint offsets removed (plain calibration zero again)")
+        return {**_desk_state(), "notes": notes}
 
     @app.post("/api/orders/{order_id}/pack-plan")
     def order_pack_plan(order_id: int):

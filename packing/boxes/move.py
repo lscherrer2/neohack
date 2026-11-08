@@ -115,10 +115,12 @@ class BoxMovePlan:
 DIP_TOL = 0.005  # a guided carry may sag this much below its lower end (m)
 
 
-def check_path(model: ArmModel, box: Box, path: list[dict], obstacles: list[Block], label: str) -> float:
+def check_path(model: ArmModel, box: Box, path: list[dict], obstacles: list[Block], label: str, desk=None) -> float:
     """A guided carry (dense joint path): the box (3D block) ≥ CLEARANCE from obstacles, the arm ≥ ARM_CLEARANCE,
-    box tilt ≤ MAX_CARRY_TILT_DEG, and the tool never below the lower end of the path − DIP_TOL. Returns the
-    largest box tilt. Raises PathError."""
+    box tilt ≤ MAX_CARRY_TILT_DEG, the tool never below the lower end of the path − DIP_TOL, and (with a desk
+    plane) no box corner below the desk + BOX_CLEAR_M. Returns the largest box tilt. Raises PathError."""
+    from .desk import box_below_desk
+
     tool_in_box_inv = np.linalg.inv(box.tool_in_box)
     z_ends = [float(model.fk(path[0])[2, 3]), float(model.fk(path[-1])[2, 3])]
     floor = min(z_ends) - DIP_TOL
@@ -134,6 +136,9 @@ def check_path(model: ArmModel, box: Box, path: list[dict], obstacles: list[Bloc
         if tilt > MAX_CARRY_TILT_DEG:
             raise PathError(f"{label}: box {box.id} would tilt {tilt:.0f}° (max {MAX_CARRY_TILT_DEG:.0f}°)", T[:3, 3])
         carried = box_block(T @ tool_in_box_inv)
+        if (below := box_below_desk(T @ tool_in_box_inv, desk)) > 0:
+            raise PathError(f"{label}: a corner of box {box.id} would come within {below * 1000:.0f} mm of touching "
+                            f"the desk ({s:.0%} of the way)", T[:3, 3])
         for ob in obstacles:
             if blocks_intersect(carried, ob, CLEARANCE / 2):
                 raise PathError(f"{label}: box {box.id} would hit {ob.name} ({s:.0%} of the way)", T[:3, 3])
@@ -198,8 +203,11 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     Raises PathError if any part is unreachable, over a joint limit, too tilted or would collide."""
     import dataclasses
 
+    from .desk import check_desk_clear
+
     pan_xy = model.pan_xy
     obstacles = obstacles or []
+    desk = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
     # grip with the fixed jaw where configured (default under the plate: wrist roll ~0, far from its limit)
     grip = with_fixed_jaw(box.tool_in_box, cfg.boxes.fixed_jaw)
     flipped = grip is not box.tool_in_box
@@ -295,7 +303,7 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             dense += [{j: a[j] + (c[j] - a[j]) * t / 6 for j in a} for t in range(1, 7)]
             a = c
         nonlocal worst
-        worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label))
+        worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label, desk))
         b.path(dense, bc.carry_speed_mm_s, label, max_joint_speed=bc.carry_joint_speed)
         return b.pose
 
@@ -380,4 +388,5 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     b.open_gripper("release the box", open_value)
     b.line_by(-_level(T_dst[:3, 2]) * bc.approach_mm / 1000, bc.line_speed_mm_s, "back out level along the tab",
               orientation_weight=OW)
+    check_desk_clear(model, b.start, b.steps, desk, f"moving box {box.id}")  # jaw tips / arm above the desk
     return BoxMovePlan(box.id, src, dst, b.steps, travel, lift_mm, tilt_deg=land_tilt, max_carry_tilt_deg=worst)

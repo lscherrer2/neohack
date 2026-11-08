@@ -224,6 +224,10 @@ def plan_pack_order(model: ArmModel, cfg, cal, order, box, current: dict[str, fl
     except PathError as e:
         raise failed(e) from e
     steps += out.steps
+    from .desk import check_desk_clear
+
+    desk = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
+    check_desk_clear(model, current, steps, desk, f"order {order.id}")  # picks + drops too, not just box moves
     if not any(isinstance(s, OpenGripper) for s in steps):
         raise AssertionError("no release step")  # can't happen: every drop and box move opens
     return PackPlan(order.id, box.id, steps, items)

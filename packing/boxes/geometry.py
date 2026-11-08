@@ -40,7 +40,7 @@ class GripCfg:
 
     from_wall_mm: float = 8.0  # tool point out from the box wall along the tab (tab is 22.9 mm long)
     max_tilt_deg: float = 25.0  # capture refused if the gripper isn't level within this
-    max_table_mm: float = 20.0  # capture refused if the box bottom isn't this close to the table (z = 0)
+    max_table_mm: float = 20.0  # capture refused if the box bottom isn't this close to the desk (z = 0, or the plane)
 
 
 def radial(pan_xy: np.ndarray, p: np.ndarray) -> np.ndarray:
@@ -67,10 +67,12 @@ class CaptureError(ValueError):
     """The hand-guided pose doesn't look like the jaws holding a box tab (message is shown to the user)."""
 
 
-def box_from_grasp(T_tool: np.ndarray, pan_xy: np.ndarray, g: GripCfg = GripCfg()) -> tuple[np.ndarray, dict]:
+def box_from_grasp(T_tool: np.ndarray, pan_xy: np.ndarray, g: GripCfg = GripCfg(), desk=None) -> tuple[np.ndarray, dict]:
     """Box pose (4x4) from the tool pose with the jaws closed (up/down) on the tab, gripper level and pointing
     away from the arm. Also returns a report. The fixed jaw's inner face is at the tool point and the part sits
-    toward tool −x (jaw meshes), so the plate's mid-plane is TAB_T/2 toward −x (x is vertical: up or down)."""
+    toward tool −x (jaw meshes), so the plate's mid-plane is TAB_T/2 toward −x (x is vertical: up or down).
+    `desk`: the calibrated desk plane (packing/boxes/desk.py) — the box bottom is compared with the desk under the
+    box instead of z = 0."""
     T_tool = np.asarray(T_tool, float)
     p, x_tool, z_tool = T_tool[:3, 3], T_tool[:3, 0], T_tool[:3, 2]
     tilt = math.degrees(math.asin(min(1.0, abs(float(z_tool[2])))))  # 0 = gripper level
@@ -85,12 +87,16 @@ def box_from_grasp(T_tool: np.ndarray, pan_xy: np.ndarray, g: GripCfg = GripCfg(
         raise CaptureError("the gripper should point away from the arm, along the tab toward the box")
     center_xy = tab_mid[:2] + u[:2] * (HALF + g.from_wall_mm * MM)
     bottom = tab_mid[2] - (BOX_H - TAB_T / 2)
-    if abs(bottom) > g.max_table_mm * MM:
-        raise CaptureError(f"that puts the box bottom {bottom * 1000:+.0f} mm from the table — are the jaws closed "
-                           f"on the tab (the plate along the box's top edge)?")
+    floor = desk.z_at(*center_xy) if desk is not None else 0.0
+    if abs(bottom - floor) > g.max_table_mm * MM:
+        raise CaptureError(f"that puts the box bottom {(bottom - floor) * 1000:+.0f} mm from the "
+                           f"{'desk' if desk is not None else 'table'} — are the jaws closed on the tab (the plate "
+                           f"along the box's top edge)?")
     T_box = box_frame(center_xy, bottom, pan_xy)
-    return T_box, {"tilt_deg": round(tilt, 1), "jaws_off_vertical_deg": round(jaws, 1),
-                   "bottom_mm": round(bottom * 1000, 1)}
+    report = {"tilt_deg": round(tilt, 1), "jaws_off_vertical_deg": round(jaws, 1), "bottom_mm": round(bottom * 1000, 1)}
+    if desk is not None:
+        report["above_desk_mm"] = round((bottom - floor) * 1000, 1)
+    return T_box, report
 
 
 def fixed_jaw_side(tool_in_box: np.ndarray) -> str:
@@ -209,9 +215,10 @@ def box_block(T_box: np.ndarray, name: str = "box") -> Block:
 PLATE_T = 0.006  # tray plate thickness (m)
 
 
-def tray_blocks(tray_cfg) -> list[Block]:
+def tray_blocks(tray_cfg, desk=None) -> list[Block]:
     """The calibrated parts tray: its plate (+ the parts sticking out of it) and the space under it down to the
-    desk (whatever holds it up). Empty if not calibrated."""
+    desk (whatever holds it up): z = 0, or the calibrated desk plane under the tray (`desk`). Empty if not
+    calibrated."""
     cal = tray_cfg.calibration() if tray_cfg else None
     if cal is None:
         return []
@@ -225,7 +232,8 @@ def tray_blocks(tray_cfg) -> list[Block]:
     corners = np.array([cal.to_robot(x, y, z / MM) for x in (o["xmin"], o["xmax"]) for y in (o["ymin"], o["ymax"])
                         for z in (zlo, zhi)])
     bottom = float(corners[:, 2].min())
-    if bottom < 0.005:
+    floor = min(desk.z_at(x, y) for x, y in corners[:, :2]) if desk is not None else 0.0
+    if bottom - floor < 0.005:
         return [plate]
     ux = cal.rot[:, 0].copy()
     ux[2] = 0.0
@@ -234,12 +242,15 @@ def tray_blocks(tray_cfg) -> list[Block]:
     a, b = corners[:, :2] @ ux[:2], corners[:, :2] @ uy[:2]
     Ts = np.eye(4)
     Ts[:3, :3] = np.column_stack([ux, uy, [0.0, 0.0, 1.0]])
-    Ts[:3, 3] = ux * (a.min() + a.max()) / 2 + uy * (b.min() + b.max()) / 2 + np.array([0, 0, bottom / 2])
-    support = Block("the parts tray (stand)", Ts, np.array([(a.max() - a.min()) / 2, (b.max() - b.min()) / 2, bottom / 2]))
+    Ts[:3, 3] = ux * (a.min() + a.max()) / 2 + uy * (b.min() + b.max()) / 2 + np.array([0, 0, (bottom + floor) / 2])
+    support = Block("the parts tray (stand)", Ts, np.array([(a.max() - a.min()) / 2, (b.max() - b.min()) / 2,
+                                                            (bottom - floor) / 2]))
     return [plate, support]
 
 
 def obstacles(cfg, box_poses: dict[int, np.ndarray], skip: int | None = None) -> list[Block]:
-    """3D blocks of the other boxes (at their current spots) and of the calibrated parts tray."""
+    """3D blocks of the other boxes (at their current spots) and of the calibrated parts tray (its stand down to
+    the desk plane if one is calibrated)."""
+    desk = cfg.desk_plane() if hasattr(cfg, "desk_plane") else None
     return ([box_block(T, f"box {bid}") for bid, T in box_poses.items() if bid != skip]
-            + tray_blocks(getattr(cfg, "tray", None)))
+            + tray_blocks(getattr(cfg, "tray", None), desk))

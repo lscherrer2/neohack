@@ -7,7 +7,7 @@ import PathOverlay from "../arm/PathOverlay";
 import { usePlannedPath } from "../arm/plannedPath";
 import BoxesBox from "./BoxesBox";
 import DeskBox from "./DeskBox";
-import type { ArmState, CalSession, DeskState, Vec3 } from "../types";
+import type { ArmState, CalSession, DeskPlaneInfo, DeskState, Vec3 } from "../types";
 import Panel from "./Panel";
 import Scene from "./Scene";
 
@@ -17,7 +17,11 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
   const { arm, stale, stream, applyArm } = useArmLive();
   const planned = usePlannedPath();
   const [deskPts, setDeskPts] = useState<Vec3[]>([]);
-  const onDesk = useCallback((d: DeskState) => setDeskPts(d.points.length ? d.points : d.saved?.points ?? []), []);
+  const [deskPlane, setDeskPlane] = useState<DeskPlaneInfo | null>(null);
+  const onDesk = useCallback((d: DeskState) => {
+    setDeskPts(d.points.length ? d.points : d.saved?.points ?? []);
+    setDeskPlane(d.saved);
+  }, []);
   const { boxes, apply: applyBoxes } = useBoxes();
 
   // ---- calibration session
@@ -66,7 +70,7 @@ export default function CalibrationTab({ trayLoad }: { trayLoad: TrayLoad }) {
     <main className="cal-grid">
       <section className="scene-wrap" aria-label="3D view of the arm and the tray">
         <Scene arm={arm.data} stale={stale} tray={trayLoad.tray} session={cal.data} highlighted={highlighted}
-               boxes={boxes} planned={planned} deskPoints={deskPts} />
+               boxes={boxes} planned={planned} deskPoints={deskPts} deskPlane={deskPlane} />
         <div className="scene-status"><span className={`dot ${status.dot}`} />{status.text}</div>
         <PathOverlay />
       </section>

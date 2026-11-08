@@ -118,6 +118,14 @@ class BoxStore:
                             (order_id, _now(), r["id"]))
         return self.get(r["id"])
 
+    def recalibrate(self, box_id: int, supply: np.ndarray, tool_in_box: np.ndarray) -> Box:
+        """New supply pose / grasp for a box (re-derived from its capture joints, e.g. after a kinematics change)."""
+        with self.lock:
+            self.db.execute("UPDATE boxes SET supply=?, tool_in_box=?, updated_at=? WHERE id=?",
+                            (json.dumps(np.asarray(supply).tolist()), json.dumps(np.asarray(tool_in_box).tolist()),
+                             _now(), box_id))
+        return self.get(box_id)
+
     def update(self, box_id: int, location: str | None = None, state: str | None = None,
                order_id: int | None | bool = False) -> Box:
         if location and location not in LOCATIONS or state and state not in STATES:

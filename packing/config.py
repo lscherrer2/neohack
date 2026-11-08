@@ -145,6 +145,13 @@ class CellConfig:
     tray: TrayCfg | None = None
     boxes: BoxesCfg = field(default_factory=BoxesCfg)
     desk_file: Path | None = None  # desk plane calibration (packing/boxes/desk.py); sim runs use sim_desk_cal.json
+    joint_offsets_file: Path | None = None  # kinematic zero offsets from the desk-touch fit (motion/joint_offsets.py)
+
+    def arm_model(self):
+        """ArmModel with this arm's calibration and saved joint offsets (re-read every call)."""
+        from .motion.kinematics import arm_model
+
+        return arm_model(self.robot_id, self.joint_offsets_file)
 
     def desk_plane(self):
         """The saved desk plane, or None (re-read every call: the dashboard may have just saved one)."""
@@ -199,6 +206,8 @@ def load_config(path: str | Path) -> CellConfig:
         boxes=_load_boxes(raw.get("boxes")),
         desk_file=rel((raw.get("desk") or {}).get("calibration_file", "data/desk_cal.json")),
     )
+    cfg.joint_offsets_file = rel((raw.get("kinematics") or {}).get(
+        "offsets_file", f"calibration/{cfg.robot_id}_joint_offsets.json"))
     try:  # jaw degrees per gripper unit from the calibrated range (0..100 spans range_min..range_max)
         from .hardware.so101 import load_calibration
 

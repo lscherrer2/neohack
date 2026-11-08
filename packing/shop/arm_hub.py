@@ -238,6 +238,18 @@ class ArmHub:
         with self._lock:
             return np.asarray(self.model.tip(pose), float)
 
+    def read_tool(self, samples: int = 5, sleep: Callable[[float], None] = time.sleep) -> tuple[dict, np.ndarray]:
+        """(body joint pose, tool pose 4x4 = gripper_frame_link in the robot frame) of the averaged joint reading."""
+        pose = self.read_pose(samples, sleep)
+        body = {j: v for j, v in pose.items() if j != "gripper"}
+        with self._lock:
+            return body, np.asarray(self.model.fk(body), float)
+
+    def reload_model(self) -> None:
+        """Rebuild the model from its factory (e.g. new joint offsets were saved)."""
+        with self._lock:
+            self._model, self._model_failed = None, False
+
     def read_pose(self, samples: int = 5, sleep: Callable[[float], None] = time.sleep) -> dict[str, float]:
         """Joint pose averaged over a few reads (hand tremor)."""
         if self.model is None:

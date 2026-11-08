@@ -47,8 +47,12 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   2047 (`HALF_TURN`), deg = (raw − 2047)·360/4095, NOT unit 0 (= range middle). The limits are asymmetric (lift 5°,
   elbow 8.7°, wrist 4° here); the range middle (as LeRobot does) left the gripper ~15° off level and the tip 2–4 cm
   low. `ArmModel.zero_deg` handles it (drive-mode sign included). With the fix the jaw resting on the table reads
-  z ≈ +5…+10 mm. Remaining error = how well the eyeballed calibration pose was held; a table-touch joint-offset fit
-  is the planned fix if needed. Units / taught poses are unaffected.
+  z ≈ +5…+10 mm. Remaining error = how well the eyeballed calibration pose was held → **joint zero-offset fit**
+  from desk touches (plan `.claude/plans/joint_offset_fit.md`, `motion/joint_offsets.py`; user saw touches right on
+  the desk near the arm and higher further out, 2026-11-07): `ArmModel(offsets_deg=)` adds degrees to the URDF angle
+  (FK + IK), saved in `calibration/<robot_id>_joint_offsets.json` (`cell.yaml` `kinematics.offsets_file`; sim
+  `start` uses `data/sim_joint_offsets.json`); build models with `cfg.arm_model()` / `kinematics.arm_model()`.
+  Units / taught poses are unaffected.
 - Workspace: there is a **monitor near the arm** — it was hit during a wide pose sweep (2026-11-07). The
   height-only clearance check doesn't know about it; keep test motions inside regions already used safely
   (home / sleep / horizontal / 50 mm push) unless the user OKs a wider area.
@@ -70,7 +74,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   - `motion/` `controller.py` `Motion`: smooth joint moves, `follow()` for paths, settle + following-error
     checks, sag compensation, stall-detect grip · `kinematics.py` URDF + placo IK (`PlacoKinematics`), straight-line
     paths, `ArmModel.link_frames()` (FK of every drawn link for the 3D view) · `program.py` motion programs:
-    `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
+    `joint_offsets.py` joint zero offsets fitted from desk touches · `ProgramBuilder` verbs (`joint_to`/`line_to`/`line_by`/`open_gripper`/`grip`/`check_holding`, no modal state)
     → validated steps → `run(steps, motion)`
   - `cell/` `inventory.py` SQLite · `procedures.py` `Cell`: pick/place + resumable `package_box`
   - `tools/` `teach.py` teach pendant · `demo.py` waypoint demo · `tune.py` servo tuning test · `calibrate.py`
@@ -183,7 +187,18 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   3+ spots far apart → least-squares plane (refused if < 3 points, bunched/collinear, or RMS > 3 mm), saved to
   `data/desk_cal.json` (`desk.calibration_file`; sim: `sim_desk_cal.json`). Box spots away from the calibrated one
   (pack spot, mirrored output) take height = calibrated bottom + plane(xy) − plane(calibrated xy) — only
-  differences, so the jaw-tip offset cancels. `GET/DELETE /api/desk`, `POST /api/desk/capture|save`,
+  differences. Touches record the **jaw tip** (tool point + 6 mm along the tool axis, `desk.touch_point`), so the
+  plane is the desk surface and is also used as the floor: box capture compares the box bottom with it (not z = 0),
+  the tray stand block goes down to it, and every planned pose (box moves, order plans, pick, go-to:
+  `desk.check_desk_clear`) keeps the jaw tip above it, the arm shoulder..wrist ≥ 15 mm and carried box corners
+  ≥ 5 mm above it. `GET /api/boxes` gives per-box `desk_mm {pack, output}` (shown in the Boxes list); the 3D view
+  draws the saved plane. No desk calibration = old behavior exactly. Each touch also keeps its joint pose
+  (`DeskPlane.poses`) for the **joint angle fit** (Desk panel → Fit joint angles → Apply; `POST
+  /api/joint-offsets/fit` dry run, `/apply`, `DELETE /api/joint-offsets`): fits Δ`shoulder_lift`/`elbow_flex` +
+  the desk plane so the touches are flattest (≥ 6 touches, ≥ 8 cm near/far, ≥ 40° around; ~25 to separate the
+  elbow, else lift alone; refused if std > 0.5°, |Δ| > 5° or no gain). Apply reloads the hub model and re-derives
+  desk points/plane + boxes from their joints; the **tray must be re-calibrated**. Refused in `serve` without
+  `--robot` (arm in another process). `GET/DELETE /api/desk`, `POST /api/desk/capture|save`,
   `DELETE /api/desk/points[/{i}]`. Box moves open the jaws to `boxes.jaw_gap_mm` 24 mm on the approach/release.
 - **Planning tolerances** (user: a few mm of play is fine — prefer plans that work): `POSITION_TOL_M` 4 mm (IK
   reach for every planned point), `MAX_JOINT_STEP` 6 units per straight-line step (motion/kinematics.py).
