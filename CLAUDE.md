@@ -160,7 +160,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   and ≥ 12 cm apart. **Grip is horizontal**: gripper level, pointing away from the arm along the tab, jaws closing
   up/down on the 2 mm tab plate (fixed jaw under the plate = wrist roll ≈ 0; on top needs roll ~180°, past its
   limit). A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that
-  grip by hand → Calibration tab "Add box". Box move: in level along the tab (22 mm), grip (no width check: plate
+  grip by hand → Calibration tab "Add box". Box move: free move to 50 mm above the spot in front of the tab
+  (arm checked against the box itself too), straight down, in level along the tab (22 mm), grip (no width check: plate
   2 mm / wall ~0.5 mm), straight up 30 mm, then either **direct** (swing to above the destination; a higher
   straight lift ≤ 80 mm if the swing passes something low) or **arc over** (when the swing passes within 4 cm of an
   obstacle's desk outline and that needs more: arc up and IN toward the swivel — the level grip reaches tool ~35 cm

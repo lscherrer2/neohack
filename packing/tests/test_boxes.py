@@ -132,19 +132,23 @@ class PlanTests(unittest.TestCase):
         for src, dst in (("supply", "pack"), ("pack", "output")):
             plan = plan_box_move(MODEL, box, src, dst, cur, self.cfg)
             kinds = [type(s).__name__ for s in plan.steps]
-            self.assertEqual(kinds, ["OpenGripper", "JointMove", "LineMove", "Grip", "LineMove", "CheckHolding",
-                                     "LineMove", "LineMove", "OpenGripper", "LineMove"])  # carry = guided path
-            come_in = plan.steps[2]  # level along the tab
+            self.assertEqual(kinds, ["OpenGripper", "JointMove", "LineMove", "LineMove", "Grip", "LineMove",
+                                     "CheckHolding", "LineMove", "LineMove", "OpenGripper", "LineMove"])
+            down = plan.steps[2]  # approach from above: straight down in front of the tab, then in level
+            d_down = MODEL.tip(down.path[-1]) - MODEL.tip(down.path[0])
+            self.assertLess(d_down[2], -0.045)
+            self.assertLess(np.linalg.norm(d_down[:2]) * 1000, 2.0)
+            come_in = plan.steps[3]  # level along the tab
             d_in = MODEL.tip(come_in.path[-1]) - MODEL.tip(come_in.path[0])
             self.assertLess(abs(d_in[2]) * 1000, 1.5)
             self.assertAlmostEqual(np.linalg.norm(d_in) * 1000, self.cfg.boxes.approach_mm, delta=1.5)
-            grasp = MODEL.fk(plan.steps[2].path[-1])
+            grasp = MODEL.fk(plan.steps[3].path[-1])
             want_src = box_pose(box, src, self.cfg, PAN) @ box.tool_in_box
             self.assertLess(np.linalg.norm(grasp[:3, 3] - want_src[:3, 3]) * 1000, 1.0)
-            lift = plan.steps[4]
+            lift = plan.steps[5]
             d = MODEL.tip(lift.path[-1]) - MODEL.tip(lift.path[0])
             np.testing.assert_allclose(d, [0, 0, self.cfg.boxes.carry_mm / 1000], atol=0.002)  # straight up
-            land = MODEL.fk(plan.steps[7].path[-1])
+            land = MODEL.fk(plan.steps[8].path[-1])
             want = box_pose(box, dst, self.cfg, PAN) @ box.tool_in_box
             self.assertLess(np.linalg.norm(land[:3, 3] - want[:3, 3]) * 1000, 1.0)  # same spot + height
             self.assertAlmostEqual(land[2, 3], want_src[2, 3], places=3)  # set down at the picked height
@@ -177,7 +181,7 @@ class PlanTests(unittest.TestCase):
             self.assertGreaterEqual(plan.carry_mm / 1000, top + 0.029)  # box bottom above the tray's top
             carry = [st for st in plan.steps if st.label.startswith(("arc", "swing", "carry"))]
             self.assertTrue(carry)
-            z_lift = MODEL.tip(plan.steps[4].path[-1])[2]
+            z_lift = MODEL.tip(plan.steps[5].path[-1])[2]
             for st in carry:  # along the whole carry: no box/tray contact, and it never sags below the lift
                 for q in st.path:
                     T = MODEL.fk(q)

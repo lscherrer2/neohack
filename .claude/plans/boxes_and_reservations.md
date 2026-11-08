@@ -136,3 +136,12 @@ arc moves out first and descends last, swing every ≤ 12° — fine-interpolate
 (`ProgramBuilder.path`); `check_path` refuses any dip > 5 mm below the lower end. Sim: lowest point 0.0 mm vs the
 lift on every leg, both directions.
 
+### Change 2026-11-07 (later): approach the tab from above
+User: the approach to the box on the left came in too low, while a right→left move arrived at the right height.
+Cause: picking up started with ONE free joint move straight to the spot in front of the tab — only its end is
+controlled, so the jaws could swoop in from below; a right→left move instead ends with a guided carry coming down
+from above. Now: free move to 50 mm above that spot (arm checked against this box too, once it's clear of it, plus
+tray/other boxes), straight down to tab height, then in level along the tab. Sim: the free move's lowest jaw height
+is ≥ +28 mm above the tab from every start tried. (Small level differences can also come from servo sag: at
+calibration the motors are off; gravity feed-forward covers the arm, not the box.)
+

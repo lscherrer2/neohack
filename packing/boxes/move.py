@@ -3,7 +3,8 @@
 The grip is horizontal (user, 2026-11-07): gripper level, pointing away from the arm along the tab, jaws closing
 up/down on the 2 mm plate.
 
-  open → free move to `approach_mm` back from the grasp (toward the arm, level) → in LEVEL along the tab → grip
+  open → free move to APPROACH_UP_M above the spot `approach_mm` back from the grasp (toward the arm) → straight
+  DOWN to tab height → in LEVEL along the tab → grip
   → straight UP `carry_mm` → carry, checked in 3D (box block ≥ CLEARANCE from the other boxes and the tray + its
   stand, the arm ≥ ARM_CLEARANCE, never dips, box tilt ≤ MAX_CARRY_TILT_DEG):
       direct — swing to above the destination (lifted higher first if the swing passes something low), or
@@ -34,6 +35,7 @@ from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersec
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
+APPROACH_UP_M = 0.05  # the free move goes to this far above the spot in front of the tab, then straight down
 DIRECT_MAX_MM = 80.0  # straight lifts above the box spot beyond this: use the arc instead (reach is low out there)
 ARC_TOP_M = 0.28  # highest box-bottom height tried for the arc (level grip reaches tool ~35 cm up at 12–27 cm out)
 ARC_RADII_M = (0.22, 0.19, 0.25, 0.16)  # tool point distance from the swivel while swinging high, tried in order
@@ -210,11 +212,28 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
 
     b = ProgramBuilder(model, current)
     b.open_gripper(f"open for the tab ({open_value})", open_value)
+    # approach FROM ABOVE: free move to above the spot in front of the tab (checked: the arm clears this box, the
+    # tray and the other boxes), straight down to tab height, then in level along the tab — the jaws never swoop
+    # in from below
     back = T_src[:3, 3] - _level(T_src[:3, 2]) * bc.approach_mm / 1000
-    seeds = ([box.joints] if box.joints else []) + reach_seeds(model, back)
-    targets, poses = best_targets(model, ik, back, T_src[:3, 2], T_src[:3, 0], seeds)
-    move = b.joint_to(targets[0], f"in front of box {box.id}'s tab", seeds=poses, targets=targets[:1])
+    above_back = back + up * APPROACH_UP_M
+    seeds = ([box.joints] if box.joints else []) + reach_seeds(model, above_back)
+    targets, poses = best_targets(model, ik, above_back, T_src[:3, 2], T_src[:3, 0], seeds)
+    start_pose = dict(b.pose)
+    move = b.joint_to(targets[0], f"above the spot in front of box {box.id}'s tab", seeds=poses, targets=targets[:1])
     travel = max(abs(move.pose[j] - b.start[j]) for j in move.pose)
+    this_box = box_block(box_pose(box, src, cfg, pan_xy), f"box {box.id} itself")
+    def near_this_box(q: dict) -> bool:
+        return any(point_in_block(pt, this_box, ARM_CLEARANCE) for pt in arm_points(model, q))
+
+    clear_of_it = not near_this_box(start_pose)  # starting right next to it (just let go of it): ignore it until clear
+    for k in range(1, 21):  # the free move: the arm stays clear of everything, including the box it goes for
+        q = {j: start_pose[j] + (move.pose[j] - start_pose[j]) * k / 20 for j in start_pose}
+        clear_of_it = clear_of_it or not near_this_box(q)
+        check_arm_clear(model, q, [*obstacles, this_box] if clear_of_it else obstacles, f"approaching box {box.id}",
+                        k / 20)
+    b.line_to(back, bc.down_speed_mm_s, f"straight down {APPROACH_UP_M * 1000:.0f} mm in front of the tab",
+              orientation_weight=OW)
     b.line_to(T_src[:3, 3], bc.down_speed_mm_s, "in level along the tab", orientation_weight=OW)
     b.grip(min_width, f"grip box {box.id}")
     gripped = b.mark()
