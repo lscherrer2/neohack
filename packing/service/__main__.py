@@ -52,7 +52,7 @@ def build_core(args):
             return dict.fromkeys(products, 99)
 
         packer = SimPacker(args.sim_seconds)
-    catalog = Catalog(products, max_items=len(cfg.box_slots), available=available)
+    catalog = Catalog(products, max_items=cfg.max_items_per_order, available=available)
     store = OrderStore(args.db or cfg.inventory_db.with_name("orders.db"))
     return store, catalog, packer
 

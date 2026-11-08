@@ -19,7 +19,7 @@ exploded), rigid fit with **scipy** `Rotation.align_vectors`; fit rejected above
 
 ## Goal
 Replace the 4 placeholder `part_slots` with a tilted, clamped parts tray whose pocket layout comes
-from a DXF (`part.dxf`). The robot picks one item per order from a full pocket, marks it empty, and
+from a DXF (`part.dxf`). The robot picks each item of an order from a full pocket, marks it empty, and
 never picks from it again until a human marks it restocked on the dashboard.
 
 ## Tray geometry (from `part.dxf`, units mm, origin = center of AA hole 1)
@@ -98,7 +98,7 @@ New `Inventory.set_pocket(location, full: bool)` (event-logged) for dashboard to
   `{id, full}`; `POST /api/tray/fill {sku?}`; `POST /api/tray/empty {sku?}`.
 - To-scale SVG of the tray drawn from the DXF features; pockets colored full/empty; click toggles;
   per-type "fill all"/counts. Live updates via existing SSE (`tray` event kind — avoid as CSS class).
-- `Shelf.available()` counts full pockets by sku; ordering agent sells one item per order.
+- `Shelf.available()` counts full pockets by sku; ordering agent sells up to `max_items_per_order` (10) items per order.
 
 ### 7. Tests (sim)
 DXF parse → 33 pockets with exact centers; Kabsch fit on synthetic tilted/rotated tray (with noise)

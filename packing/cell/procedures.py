@@ -86,7 +86,7 @@ class Cell:
             self.log(f"  missed part {part.id}: {e}. Marked missing.")
             raise
         self.travel()
-        self.place(self.cfg.box_slots[slot].pose)
+        self.place(self.cfg.box_slots[slot % len(self.cfg.box_slots)].pose)
         self.inventory.pack_part(part.id, box_id, slot)
 
     def _candidates(self, sku: str | None) -> list[Part]:
@@ -108,10 +108,13 @@ class Cell:
 
     def package_box(self, skus: list[str] | None = None) -> str:
         """Get a box to the pack station (or resume the one there), fill it, move it out.
-        `skus`: what to put in the box, one per box slot in order (an order's items). None = the fixed
-        recipe from `box_slots`. Safe to call again after any stop: it resumes from the inventory."""
-        if skus is not None and len(skus) > len(self.cfg.box_slots):
-            raise CellError(f"{len(skus)} items but a box only has {len(self.cfg.box_slots)} slots")
+        `skus`: what to put in the box (an order's items, up to `max_items_per_order`); item i is box slot i,
+        dropped at `box_slots[i % len(box_slots)]`. None = the fixed recipe from `box_slots`. Safe to call
+        again after any stop: it resumes from the inventory."""
+        if not self.cfg.box_slots:
+            raise CellError("no box_slots (drop spots) configured")
+        if skus is not None and len(skus) > self.cfg.max_items_per_order:
+            raise CellError(f"{len(skus)} items but an order holds at most {self.cfg.max_items_per_order}")
         if skus is not None:
             plan = list(enumerate(skus))
         else:

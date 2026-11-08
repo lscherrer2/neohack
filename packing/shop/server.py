@@ -81,7 +81,7 @@ def build_mcp(tools: ShopTools, events: EventLog | None = None) -> MCPServer:
     def list_products() -> str:
         return safe(tools.list_products)
 
-    @mcp.tool(description="Place an order for the robot to pack. Confirm the items and name with the customer first.")
+    @mcp.tool(description="Place an order for the robot to pack: one entry per product with its quantity (any mix, up to the per-order limit list_products gives). Confirm the items and name with the customer first.")
     def place_order(items: list[OrderItem], customer_name: str, phone: str | None = None) -> str:
         return safe(tools.place_order, items=[i.model_dump() for i in items], customer_name=customer_name,
                     phone=phone)

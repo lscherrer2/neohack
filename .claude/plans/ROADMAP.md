@@ -89,7 +89,7 @@ The system is a stack: each layer only works if the ones under it do. Status per
 - ✅ SQLite inventory (`cell/inventory.py`), committed before and after each physical step, resumable after a
   crash, event log.
 - ✅ Tray pockets are inventory slots (`cfg.stock_slots`). Humans mark them full/empty on the dashboard.
-- ✅ `Cell.package_box`: box to station → fill → ship, resumable. One item per order (`box_slots` has 1 slot).
+- ✅ `Cell.package_box`: box to station → fill → ship, resumable. Up to `max_items_per_order` (10) items per order; items cycle through `box_slots` drop spots (1 today).
 - 🔴 `Cell` only picks from taught `part_slots` (now empty), **not from tray pockets**. Needs a `pick_tray`
   path and a pocket choice (lowest-numbered full pocket of that item).
 - 🔴 The box steps need taught or calibrated box positions (layer 3).

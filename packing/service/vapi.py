@@ -23,7 +23,7 @@ VAPI_API = "https://api.vapi.ai"
 @dataclass
 class Catalog:
     products: dict[str, str]  # sku -> spoken name
-    max_items: int  # box slots
+    max_items: int  # items per order (cfg.max_items_per_order)
     available: Callable[[], dict[str, int]] = field(default=lambda: {})  # sku -> parts on the shelf
 
     def resolve(self, ref: str) -> str:
@@ -60,7 +60,7 @@ def parse_items(raw, catalog: Catalog) -> list[str]:
     if not skus:
         raise OrderError("What would you like to order?")
     if len(skus) > catalog.max_items:
-        raise OrderError(f"One box holds up to {catalog.max_items} items; that order has {len(skus)}.")
+        raise OrderError(f"An order can have up to {catalog.max_items} items; that one has {len(skus)}.")
     return skus
 
 
@@ -160,7 +160,7 @@ class ToolHandler:
     def list_products(self) -> str:
         stock = self._in_stock()
         parts = [f"{name} ({stock.get(sku, 0)} in stock)" for sku, name in self.catalog.products.items()]
-        return f"We have: {', '.join(parts)}. One box holds up to {self.catalog.max_items} items."
+        return f"We have: {', '.join(parts)}. An order can have up to {self.catalog.max_items} items in total."
 
     def place_order(self, args: dict, caller: str | None, call_id: str | None, tool_call_id: str | None) -> str:
         if existing := self.store.by_tool_call(tool_call_id):  # Vapi retry: same answer, no new order

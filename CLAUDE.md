@@ -103,7 +103,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `piezo_1..8` (pick point = midpoint of the pin pair), `glue_1..8`, `breadboard_1..5`; `_1` = row nearest the arm.
 - Tray frame = DXF x/y, z out of the face; DXF x runs left→right as seen from the arm. Grip: fingers close along
   tray x for all but the breadboard (tray y). Catalog names come from the tray types; `part_slots` is empty;
-  one item per order (`box_slots` has one slot). `cfg.stock_slots` = part_slots + tray pockets.
+  up to `max_items_per_order` (10) items per order, any mix; items cycle through the `box_slots` drop spots
+  (one spot today: item i → `box_slots[i % len]`). `cfg.stock_slots` = part_slots + tray pockets.
 - Calibration: motors off, touch the closed gripper tip (`gripper_frame_link`, red dot in the 3D view) to reference
   points → scipy rigid fit, refused above 3 mm RMS. `tray.calibration_mode`: **corners** (default; the middle of each
   rounded plate corner on the top edge, ids `corner_bl/tl/br/tr`, `TrayLayout.corners()`) or **pockets**
@@ -186,6 +187,7 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   `SHOP_MCP_TOKEN`) → Bearer auth, else open; `--allow-host` (repeatable, wildcards) → Host check, else any host.
   `/mcp` (chat agent's tools) is unchanged.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.
+  Phone-agent system prompt to paste into Vapi: `packing/shop/vapi_prompt.md` (uses `{{customer.number}}`).
 
 ## Conventions
 - Every location `L` = poses `L.above` + `L.at`; between stations go via `travel_pose` (`home`).

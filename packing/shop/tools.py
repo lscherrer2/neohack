@@ -27,7 +27,7 @@ class ShopTools:
     def list_products(self) -> str:
         stock = self.in_stock()
         parts = [f"{name} ({stock.get(sku, 0)} in stock)" for sku, name in self.catalog.products.items()]
-        return f"We have: {', '.join(parts)}. One box holds up to {self.catalog.max_items} items."
+        return f"We have: {', '.join(parts)}. An order can have up to {self.catalog.max_items} items in total."
 
     def place_order(self, items, customer_name: str, phone: str | None = None) -> str:
         return self.create_order(items, customer_name, phone)[1]

@@ -107,6 +107,7 @@ class CellConfig:
     pack_station: str
     box_output: list[str]
     box_slots: list[BoxSlot]
+    max_items_per_order: int = 10  # items in one order/box; drop spots cycle through box_slots
     catalog: dict[str, str] = field(default_factory=dict)  # sku -> spoken product name (voice ordering)
     gripper: GripperCfg = field(default_factory=GripperCfg)
     motion: MotionCfg = field(default_factory=MotionCfg)
@@ -151,6 +152,7 @@ def load_config(path: str | Path) -> CellConfig:
         pack_station=loc["pack_station"],
         box_output=list(loc.get("box_output") or []),
         box_slots=[BoxSlot(**s) if isinstance(s, dict) else BoxSlot(pose=s) for s in raw.get("box_slots") or []],
+        max_items_per_order=int(raw.get("max_items_per_order", 10)),
         catalog={str(k): str(v) for k, v in (raw.get("catalog") or {}).items()},
         gripper=GripperCfg(**(raw.get("gripper") or {})),
         motion=MotionCfg(**(raw.get("motion") or {})),

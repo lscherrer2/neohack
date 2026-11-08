@@ -32,7 +32,7 @@ def load(args):
     cfg = load_config(args.config)
     shelf = Shelf(cfg)
     products = cfg.catalog or {sku: f"product {sku}" for sku in dict.fromkeys(cfg.stock_slots.values())}
-    catalog = Catalog(products, max_items=len(cfg.box_slots), available=shelf.available)
+    catalog = Catalog(products, max_items=cfg.max_items_per_order, available=shelf.available)
     store = OrderStore(getattr(args, "db", None) or cfg.inventory_db.with_name("shop_orders.db"))
     return catalog, store, shelf
 

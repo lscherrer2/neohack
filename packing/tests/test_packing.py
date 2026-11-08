@@ -49,6 +49,20 @@ class PackingTests(unittest.TestCase):
         self.assertEqual(inv.in_gripper(), [])
         self.assertEqual(len(inv.parts("available")), 2)
 
+    def test_order_with_more_items_than_drop_spots(self):
+        cfg, arm, inv, cell = make_cell(self.tmp)
+        self.assertEqual(cfg.max_items_per_order, 10)
+        self.assertEqual(len(cfg.box_slots), 2)
+        inv.restock(cfg.part_slots, cfg.box_supply)
+        bid = cell.package_box(["A", "A", "B"])  # 3 items, 2 drop spots: item 2 reuses spot 0
+        contents = inv.contents(bid)
+        self.assertEqual(sorted(contents), [0, 1, 2])
+        self.assertEqual([contents[i].sku for i in range(3)], ["A", "A", "B"])
+        self.assertEqual(inv.box(bid).status, "packed")
+        cfg.max_items_per_order = 2
+        with self.assertRaises(CellError):
+            cell.package_box(["A", "B", "B"])
+
     def test_second_box_then_out_of_stock_and_resume(self):
         cfg, arm, inv, cell = make_cell(self.tmp)
         inv.restock(cfg.part_slots, cfg.box_supply)

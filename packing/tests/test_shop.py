@@ -6,7 +6,7 @@ import unittest
 from fastapi.testclient import TestClient
 from mcp import Client
 
-from packing.service.orders import OrderStore
+from packing.service.orders import OrderError, OrderStore
 from packing.service.vapi import Catalog
 from packing.service.worker import SimPacker
 from packing.shop.robot_agent import run
@@ -34,6 +34,15 @@ class ShopTests(unittest.TestCase):
                 return sorted(t.name for t in (await c.list_tools()).tools)
 
         self.assertEqual(asyncio.run(go()), ["cancel_order", "check_order", "list_products", "place_order"])
+
+    def test_multi_item_order_up_to_limit(self):
+        catalog = Catalog({"A": "widget", "B": "gadget"}, max_items=10, available=lambda: {"A": 8, "B": 5})
+        tools = ShopTools(OrderStore(":memory:"), catalog)
+        self.assertIn("up to 10 items", tools.list_products())
+        order, _ = tools.create_order([{"product": "widget", "quantity": 6}, {"product": "B", "quantity": 4}], "Sam")
+        self.assertEqual(sorted(order.items), ["A"] * 6 + ["B"] * 4)
+        with self.assertRaisesRegex(OrderError, "up to 10 items"):
+            tools.create_order([{"product": "widget", "quantity": 1}, {"product": "B", "quantity": 1}] * 6, "Al")
 
     def test_order_flow_over_mcp(self):
         self.assertIn("widget (3 in stock)", self.mcp("list_products"))

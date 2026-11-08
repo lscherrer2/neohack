@@ -44,8 +44,9 @@ tray:
 
 # catalog: (sku -> spoken name) defaults to the tray type names above
 
-box_slots:                 # positions inside the box *at the pack station*, filled in order
-  - {pose: box_slot_1}     # one item per order, any sku
+max_items_per_order: 10    # items one order (= one box) may hold
+box_slots:                 # drop spots inside the box *at the pack station*, filled in order;
+  - {pose: box_slot_1}     # with fewer spots than items they repeat (item i -> spot i % len). Any sku
 
 gripper:
   open: 60                 # verified Nov 2026: higher = more open (0 = jaws closed)

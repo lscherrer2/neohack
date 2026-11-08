@@ -27,7 +27,8 @@ catalog:                   # sku -> name the voice agent uses (SKUs must match p
   A: widget
   B: gadget
 
-box_slots:                 # positions inside the box *at the pack station*, filled in order
+max_items_per_order: 10    # items one order (= one box) may hold
+box_slots:                 # drop spots inside the box *at the pack station*, filled in order (repeat if fewer than items)
   - {pose: box_slot_1, sku: A}
   - {pose: box_slot_2, sku: B}
 
