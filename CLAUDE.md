@@ -179,8 +179,10 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   (`tool/robot/order/chat/error/system`) — they collide with the activity list styles.
 - **Remote-agent MCP** (`shop/mcp_server.py`, FastMCP, mounted by `start`/`serve` at **`/agent/mcp`**, streamable
   HTTP, stateless): `get_inventory` (sku/name/available = stock − open orders) and `create_order` (customer_name,
-  items, phone?) are real (same DBs; orders arrive `queued`, source `mcp-remote`, so the robot only packs after
-  Action); `check_order` / `cancel_order` are stubs. For the cloud-agent tunnel test. Flags: `--mcp-token` (or env
+  items, phone?), `check_order` (status + queue position) and `cancel_order` (received/ready only) — same DBs;
+  orders arrive `queued`, source `mcp-remote`, and are **not** auto-dispatched: the robot packs only after Action.
+  For the cloud-agent tunnel test. A tunnel to :8000 exposes the whole server (dashboard + arm API, no auth) —
+  only `/agent/mcp` checks the token. Flags: `--mcp-token` (or env
   `SHOP_MCP_TOKEN`) → Bearer auth, else open; `--allow-host` (repeatable, wildcards) → Host check, else any host.
   `/mcp` (chat agent's tools) is unchanged.
 - Vapi later: put it in front of the same MCP server (Vapi `mcp` tool type) or the old webhook adapter.

@@ -10,9 +10,10 @@ stock from the cell inventory (`shelf.Shelf`), orders in packing/data/shop_order
 human presses Action, so this server never moves the arm.
 
 Tools:
-  get_inventory  — real: products with what's available to order (stock minus open orders)
-  create_order   — real: places an order (one box holds `max_items` items)
-  check_order, cancel_order — stubs: disabled in this test server, they change nothing
+  get_inventory  — products with what's available to order (stock minus open orders)
+  create_order   — places an order (one box holds `max_items` items); it waits for Action on the dashboard
+  check_order    — status + place in line
+  cancel_order   — cancels a received/ready order (not once packing has started)
 
 Security: a tunnel makes this public. Pass --mcp-token (or env SHOP_MCP_TOKEN) to require
 `Authorization: Bearer <token>`. Host header: any by default (like /mcp; tunnel hostnames change); --allow-host
@@ -32,10 +33,9 @@ from .tools import ShopTools
 INSTRUCTIONS = (
     "Tools for a small parts shop whose orders are packed by a robot arm. Use get_inventory to see what can be "
     "ordered and how many are available, and create_order to place an order (customer name + item names "
-    "exactly as get_inventory lists them, or their sku). check_order and cancel_order are disabled for now."
+    "exactly as get_inventory lists them, or their sku). check_order reports an order's status; cancel_order "
+    "cancels one that hasn't started packing. New orders wait until the shop releases them to the robot."
 )
-DISABLED = "This tool is disabled on this test server; nothing was changed."
-
 
 def create_mcp(store: OrderStore, catalog: Catalog, token: str | None = None):
     """FastMCP server with the shop tools. `token`: require this bearer token (None = open)."""
@@ -75,14 +75,25 @@ def create_mcp(store: OrderStore, catalog: Catalog, token: str | None = None):
         return {"order_id": order.id, "status": "received", "items": catalog.describe(order.items), "message": text}
 
     @mcp.tool
-    def check_order(order_id: int) -> str:
-        """(Disabled in this test server.) Would report an order's status."""
-        return DISABLED
+    def check_order(order_id: Annotated[int, Field(description="Order number from create_order")]) -> dict:
+        """Status of an order: received (waiting for the shop), ready, packing, packed, failed or cancelled,
+        plus its place in line while it waits."""
+        try:
+            text = tools.check_order(order_id)
+        except OrderError as e:
+            raise ToolError(str(e)) from e
+        o = store.get(order_id)
+        return {"order_id": o.id, "status": "received" if o.status == "queued" else o.status,
+                "items": catalog.describe(o.items), "queue_position": store.queue_position(o.id), "message": text}
 
     @mcp.tool
-    def cancel_order(order_id: int) -> str:
-        """(Disabled in this test server.) Would cancel an order."""
-        return DISABLED
+    def cancel_order(order_id: Annotated[int, Field(description="Order number from create_order")]) -> dict:
+        """Cancel an order that hasn't started packing yet (received or ready). Frees its reserved stock."""
+        try:
+            text = tools.cancel_order(order_id)
+        except OrderError as e:
+            raise ToolError(str(e)) from e
+        return {"order_id": order_id, "status": "cancelled", "message": text}
 
     return mcp
 

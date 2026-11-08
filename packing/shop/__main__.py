@@ -3,7 +3,7 @@
    python -m packing.shop robot [--robot]  # robot agent (simulated packing unless --robot)
    python -m packing.shop chat             # Claude Haiku ordering agent using the MCP tools
 Remote agents (cloud agent via a tunnel): `start` / `serve` also serve a FastMCP server at /agent/mcp
-(get_inventory + create_order; check/cancel stubbed) — see mcp_server.py; --mcp-token / --allow-host.
+(get_inventory, create_order, check_order, cancel_order) — see mcp_server.py; --mcp-token / --allow-host.
 
 All data is real: orders in packing/data/shop_orders.db, stock from packing/data/inventory.db
 (the packing cell's inventory; restock it from the dashboard after refilling the shelves).

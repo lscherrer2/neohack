@@ -16,7 +16,7 @@ from fastmcp.exceptions import ToolError
 
 from packing.service.orders import OrderStore
 from packing.service.vapi import Catalog
-from packing.shop.mcp_server import DISABLED, create_mcp
+from packing.shop.mcp_server import create_mcp
 from packing.shop.server import create_server
 
 
@@ -70,11 +70,25 @@ class ToolTests(unittest.TestCase):
             self.call("create_order", {"customer_name": "", "items": ["aa"]})
         self.assertEqual(self.store.list(limit=10), [])
 
-    def test_stubs_change_nothing(self):
+    def test_check_and_cancel(self):
         oid = self.call("create_order", {"customer_name": "Sam", "items": ["aa"]}).data["order_id"]
-        self.assertEqual(self.call("cancel_order", {"order_id": oid}).data, DISABLED)
-        self.assertEqual(self.call("check_order", {"order_id": oid}).data, DISABLED)
-        self.assertEqual(self.store.get(oid).status, "queued")
+        st = self.call("check_order", {"order_id": oid}).data
+        self.assertEqual((st["status"], st["queue_position"]), ("received", 1))
+        self.assertEqual(self.call("cancel_order", {"order_id": oid}).data["status"], "cancelled")
+        self.assertEqual(self.store.get(oid).status, "cancelled")
+        self.assertEqual(self.call("check_order", {"order_id": oid}).data["status"], "cancelled")
+        with self.assertRaises(ToolError):  # already cancelled
+            self.call("cancel_order", {"order_id": oid})
+        with self.assertRaises(ToolError):
+            self.call("check_order", {"order_id": 999})
+
+    def test_cannot_cancel_once_packing(self):
+        oid = self.call("create_order", {"customer_name": "Sam", "items": ["aa"]}).data["order_id"]
+        self.store.db.execute("UPDATE orders SET status='packing' WHERE id=?", (oid,))
+        with self.assertRaises(ToolError) as e:
+            self.call("cancel_order", {"order_id": oid})
+        self.assertIn("can't be cancelled", str(e.exception))
+        self.assertEqual(self.store.get(oid).status, "packing")
 
 
 def free_port():

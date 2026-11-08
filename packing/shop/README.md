@@ -59,7 +59,8 @@ Started automatically with `start` / `serve` (FastMCP, `mcp_server.py`). For a c
     cloudflared tunnel --url http://localhost:8000                  # or ngrok http 8000
     # agent: MCP server URL https://<tunnel-host>/agent/mcp, header Authorization: Bearer SECRET
 
-Tools: `get_inventory`, `create_order` (real); `check_order`, `cancel_order` (stubs, change nothing).
+Tools: `get_inventory`, `create_order`, `check_order`, `cancel_order` (received/ready orders only).
+Caution: the tunnel exposes the whole server (dashboard + arm API have no auth); only `/agent/mcp` checks the token.
 Orders arrive "received" — the robot packs them only after **Action** on the dashboard. Stock comes from the tray
 pockets marked full on the dashboard (all empty = every order is refused for stock). `--allow-host '*.trycloudflare.com'`
 restricts the Host header (default: any). The chat agent's `/mcp` is separate and unchanged.
