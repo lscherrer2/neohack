@@ -149,7 +149,12 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   (`tools.py`, replies are short spoken sentences). Web chat (`POST /api/chat`) and terminal chat share
   `chat.Conversation`.
 - **Manual dispatch is the default**: orders arrive `queued` (shown as "received"); the dashboard's
-  **Action** → `ready`; the robot agent only claims `ready` orders (`--auto` claims `queued`).
+  **Action** → `ready`; the robot agent claims `ready` orders first. **Auto pack** toggle (Orders tab header,
+  `GET/PUT /api/auto-pack {enabled}`, also `auto_pack` in `/api/state`; in memory, off on every start unless `--auto`):
+  when on, the claim also takes the NEWEST `queued` order whose items all have a reserved unit, skipping orders
+  refused before (error set: only Action sends them); with `start --robot` only once an empty box is at supply and
+  no box is at the pack spot. The status line says the next order or why it waits. A packing failure turns it off.
+  `OrderStore.claim(id)` / `claim_next` are atomic (one plain Lock: never take it twice — that deadlocked the claim).
   **Delete** (one click, no confirm) allowed for queued/ready/failed/cancelled; **Delete all** (`DELETE /api/orders`,
   click twice within 3 s) removes every such order. Statuses: queued → ready → packing → packed | failed.
 - **Per-unit reservations** (plan `.claude/plans/boxes_and_reservations.md`): every item of an open order
@@ -195,9 +200,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   a packed box at output = obstacle until **Picked up** (Calibration → Packing boxes; `DELETE /api/boxes/{id}`). An
   `in_use` box can be removed unless its order is `packing`. Demo quality: no resume/retries. Each part is marked
   used as soon as it's out of its pocket (live tray map; event "item i/n: sku from pocket → box"). Gripper closes on
-  nothing → pocket marked empty (reservation moves/goes short), order `failed`, agent stops. Refused before moving
+  nothing → pocket marked empty (reservation moves/goes short), order `failed`, auto pack turns off. Refused before moving
   (no free box, another box at the pack spot, unplannable: `NotStarted`) → box given back, order back to `queued`
-  (`POST /robot/orders/{id}/requeue`), agent keeps going (30 s back-off).
+  (`POST /robot/orders/{id}/requeue`, error kept so auto pack skips it until Action).
   `GET /api/boxes`, `POST /api/boxes/capture`, `POST /api/arm/box-move`, `POST /api/orders/{id}/pack-plan` (dry run,
   Orders → Check). Part `length_mm` per tray type = estimates (release point).
 - **Desk plane** (handoff doc `.claude/plans/FLOOR_CALIBRATION.md`; `packing/boxes/desk.py`, Calibration tab → Desk): motors off, touch the closed jaw tip to the desk at
@@ -251,7 +256,8 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   calibrating. Restarting the server drops an unsaved calibration session (points live in memory) and leaves the
   torque as it was (off if calibrating) until Connect.
 - Robot agent polls `POST /robot/claim` (returns the in-progress order first → resume), reports
-  `done`/`failed`/`requeue`, and **exits on a packing failure** (human checks arm; not on a refusal before moving).
+  `done`/`failed`/`requeue`, and **never exits** (a dead agent showed "robot agent offline"): after a failure it
+  keeps checking in; the server turns auto pack off so a human checks the arm before the next order.
 - Dashboard = React app (`packing/shop/web/`, served from `static/app/` at `/dashboard/`; old
   `static/dashboard.html` is only a fallback if the build is missing). Tabs: **Orders** (status plate, chat,
   stock + Restock, 2D tray map — click a pocket to toggle full/empty, orders with Action/Delete, live activity via

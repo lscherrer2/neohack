@@ -251,14 +251,18 @@ class OrderStore:
         """Atomically move the oldest order in `from_status` ('queued', or 'ready' for manual starts) to 'packing'."""
         with self.lock:
             r = self.db.execute("SELECT id FROM orders WHERE status=? ORDER BY id LIMIT 1", (from_status,)).fetchone()
-            return self.claim(r["id"], from_status) if r else None
+            return self._claim(r["id"], from_status) if r else None
 
     def claim(self, order_id: int, from_status: str = "queued") -> Order | None:
         """Atomically move this order from `from_status` to 'packing'. None if it isn't in that status (any more)."""
         with self.lock:
-            cur = self.db.execute("UPDATE orders SET status='packing', updated_at=? WHERE id=? AND status=?",
-                                  (_now(), order_id, from_status))
-            return self.get(order_id) if cur.rowcount else None
+            return self._claim(order_id, from_status)
+
+    def _claim(self, order_id: int, from_status: str) -> Order | None:
+        """claim() body; the caller holds self.lock (a plain Lock: taking it twice deadlocks)."""
+        cur = self.db.execute("UPDATE orders SET status='packing', updated_at=? WHERE id=? AND status=?",
+                              (_now(), order_id, from_status))
+        return self.get(order_id) if cur.rowcount else None
 
     def update(self, order_id: int, status: str | None = None, **fields) -> Order:
         allowed = {"box_id", "callback_call_id", "error"}

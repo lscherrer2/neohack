@@ -270,3 +270,8 @@ table.points td:last-child, table.points th:last-child { padding-right: 0; }
 .panel button.stop, .goto button.stop { background: var(--alarm); color: #fff; border-color: var(--alarm); min-width: 7em; }
 .moving-note { margin: 4px 0; color: var(--ink); font-weight: 600; }
 button.del.small { margin-left: auto; font-size: .8rem; padding: 3px 8px; border-color: color-mix(in srgb, var(--alarm) 40%, transparent); }
+
+/* Orders: Auto pack toggle (Off / On) under the header. */
+.auto-pack { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 12px; }
+.auto-pack .label { font: 600 .98rem/1 var(--sign); }
+.auto-pack .seg button { min-width: 4.5em; }

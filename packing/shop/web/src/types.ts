@@ -33,6 +33,8 @@ export interface ShopState {
   robot: RobotInfo;
   counts: Partial<Record<string, number>>;
   auto_dispatch: boolean;
+  /** Auto pack toggle: next_order = what the robot would take now; waiting = why it can't yet. */
+  auto_pack?: { enabled: boolean; next_order: number | null; waiting: string | null };
   stock: StockItem[] | null;
   orders: Order[];
 }

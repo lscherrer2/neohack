@@ -11,7 +11,9 @@ const DELETABLE = ["queued", "ready", "failed", "cancelled"];
 
 export default function OrdersTable({ state, refreshState }: { state: ShopState | null; refreshState: () => void }) {
   const [busy, setBusy] = useState<Set<number>>(new Set());
-  const auto = state?.auto_dispatch ?? false;
+  const autoPack = state?.auto_pack;
+  const auto = autoPack?.enabled ?? state?.auto_dispatch ?? false;
+  const [autoBusy, setAutoBusy] = useState(false);
   const [armDeleteAll, setArmDeleteAll] = useState(false); // second click within 3 s deletes
   const [deletingAll, setDeletingAll] = useState(false);
   const [checks, setChecks] = useState<Record<number, { ok: boolean; text: string }>>({});
@@ -37,6 +39,19 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
     const t = setTimeout(() => setArmDeleteAll(false), 3000);
     return () => clearTimeout(t);
   }, [armDeleteAll]);
+
+  /** Auto pack: the robot packs the newest received order with all its stock once a box is ready. */
+  async function setAuto(enabled: boolean) {
+    if (enabled === auto) return;
+    setAutoBusy(true);
+    try {
+      await api("PUT", "/api/auto-pack", { enabled });
+    } catch (e) {
+      alert(errText(e) || "Couldn't change auto pack.");
+    }
+    setAutoBusy(false);
+    refreshState();
+  }
 
   async function deleteAll() {
     if (!armDeleteAll) { setArmDeleteAll(true); return; }
@@ -77,6 +92,21 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
           </button>
         )}
       </header>
+      <div className="auto-pack">
+        <span className="label">Auto pack</span>
+        <div className="seg" role="group" aria-label="Auto pack">
+          <button type="button" className={!auto ? "on" : ""} aria-pressed={!auto} disabled={autoBusy || !state}
+                  onClick={() => setAuto(false)}>Off</button>
+          <button type="button" className={auto ? "on" : ""} aria-pressed={auto} disabled={autoBusy || !state}
+                  onClick={() => setAuto(true)}>On</button>
+        </div>
+        <span className="sub">
+          {!auto ? "Only orders sent with Action are packed."
+            : autoPack?.next_order != null ? `Packs order ${autoPack.next_order} next (newest with all its stock).`
+            : autoPack?.waiting ? `Waiting: ${autoPack.waiting}.`
+            : "Packs the newest received order with all its stock once a box is ready."}
+        </span>
+      </div>
       {!state ? null : !orders.length ? (
         <p className="empty">No orders yet. Place one at the order counter.</p>
       ) : (
@@ -111,7 +141,7 @@ export default function OrdersTable({ state, refreshState }: { state: ShopState 
                       <button className="linkish check-btn" title="Dry run: can the arm pack this order? Nothing moves."
                               onClick={() => check(o)}>Check</button>
                     )}
-                    {o.status === "queued" && !auto && (
+                    {o.status === "queued" && (
                       <button className="act" disabled={busy.has(o.id)} onClick={() => act(o, "action")}>Action</button>
                     )}
                     {DELETABLE.includes(o.status) && (

@@ -18,7 +18,9 @@ export default function Plate({ state }: { state: ShopState | null }) {
       sub = `Robot agent is connected (last check-in ${ago(robot.last_seen_s)}).`;
       const queued = counts.queued ?? 0;
       if (queued && !auto_dispatch)
-        sub = `${queued} received order${queued > 1 ? "s are" : " is"} waiting. Click Action to send one to the robot.`;
+        sub = `${queued} received order${queued > 1 ? "s are" : " is"} waiting. Click Action to send one to the robot, or turn Auto pack on.`;
+      else if (queued && state.auto_pack?.waiting)
+        sub = `Auto pack is waiting: ${state.auto_pack.waiting}.`;
       if (robot.last_failure) {
         dataState = "failed";
         title = `Order ${robot.last_failure.id} failed`;

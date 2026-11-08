@@ -127,6 +127,10 @@ class FillIn(BaseModel):
     sku: str | None = None
 
 
+class AutoIn(BaseModel):
+    enabled: bool  # dashboard "Auto pack" toggle
+
+
 class ConfirmIn(BaseModel):
     confirm_hold: bool = False
 
@@ -258,13 +262,14 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             if not any(b.state == "available" and b.location == "supply" for b in listed):
                 return None, "no empty box at the supply spot (add one on the Calibration tab)"
         # enough goods: every item has its own reserved unit (no shelf = no stock tracking: any order)
-        o = next((o for o in queued if shelf is None or (o.items and o.slots and None not in o.slots)), None)
+        # refused before (error set on requeue) = needs a person: only Action sends it again
+        fresh = [o for o in queued if not o.error]
+        if not fresh:
+            return None, "the received orders were refused before; send them with Action"
+        o = next((o for o in fresh if shelf is None or (o.items and o.slots and None not in o.slots)), None)
         if o is None:
             return None, "not enough stock in the tray for any received order"
         return o, None
-
-    class AutoIn(BaseModel):
-        enabled: bool
 
     def _auto_state() -> dict:
         cand, why = _auto_candidate() if auto["on"] else (None, None)
@@ -304,6 +309,10 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         _packing(order_id)
         o = store.update(order_id, "failed", error=body.error)
         events.record("error", f"Order {order_id} failed to pack: {body.error}", order_id=order_id)
+        if auto["on"]:  # check the arm first: from now on only orders sent with Action
+            auto["on"] = False
+            events.record("order", "Auto pack turned off after the failure; check the arm, then send the next order "
+                                   "with Action or turn auto pack back on", order_id=order_id)
         return o.to_dict()
 
     @app.post("/robot/orders/{order_id}/requeue")
