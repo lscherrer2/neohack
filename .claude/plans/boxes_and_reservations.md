@@ -145,3 +145,11 @@ tray/other boxes), straight down to tab height, then in level along the tab. Sim
 is ≥ +28 mm above the tab from every start tried. (Small level differences can also come from servo sag: at
 calibration the motors are off; gravity feed-forward covers the arm, not the box.)
 
+### Change 2026-11-07 (later): fixed jaw under the plate (flip option)
+User: the drawn path looks right but the box still comes in low; asked to flip the jaws so the fixed jaw is on the
+bottom. The planner replays the calibrated grip; calibrated with the fixed jaw on top it needs wrist roll ~180°, at
+the joint limit (sim: IK then compromises ~20°). `boxes.fixed_jaw` (bottom | top | as_calibrated, default bottom):
+`geometry.with_fixed_jaw` flips the grip 180° about tool z and moves the grip point to the plate's other face
+(p − x·2 mm; a first draft had the sign wrong — caught by the test, never ran on the arm). `GET /api/boxes` and the
+box list show `fixed_jaw_calibrated` / `fixed_jaw_used`.
+

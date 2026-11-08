@@ -111,6 +111,8 @@ class BoxesCfg:
     # -> box centers >= ~30 cm out. 355 works for grips 8–20 mm from the wall (345 failed deeper grips' back-out;
     # 365+ loses the drops over the box)
     carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging, clears neighbours)
+    fixed_jaw: str = "bottom"  # grip with the FIXED jaw under the tab plate (moving jaw on top) whatever the
+    # calibration used — wrist roll ~0; fixed jaw on top needs roll ~180°, at its limit. "top" / "as_calibrated"
     min_center_mm: float = 305.0  # box center at least this far from the swivel: closer, the level approach /
     # back-out along the tab runs into the arm's reach limit (sim: 304 ok, 302 fails)
     approach_mm: float = 22.0  # open jaws come in level along the tab from this far back (and back out after):

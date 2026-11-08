@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, and the order of work).
+**Start here for what to build next: `.claude/plans/ROADMAP.md`** (the stack, layer by layer, the order of work, and the current checklist under "Next steps": one order procedure on `TrayPacker`; the old `Cell` path is being deleted).
 
 Drives a **single SO-101 follower arm (Hiwonder kit, no leader arm)** straight over the Feetech servo SDK —
 **no LeRobot** (removed Nov 2026; our driver keeps LeRobot's units and calibration format). The project is
@@ -158,8 +158,9 @@ tracks inventory; `packing/shop/` puts an ordering agent + React dashboard (orde
   not run on hardware): supply boxes on the LEFT, tab facing the swivel, box centers **≥ 30.5 cm from the swivel** (`boxes.min_center_mm`;
   Add box refuses closer — the 22 mm level approach/back-out along the tab can't be reached there)
   and ≥ 12 cm apart. **Grip is horizontal**: gripper level, pointing away from the arm along the tab, jaws closing
-  up/down on the 2 mm tab plate (fixed jaw under the plate = wrist roll ≈ 0; on top needs roll ~180°, past its
-  limit). A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that
+  up/down on the 2 mm tab plate. **`boxes.fixed_jaw: bottom`** (default): planning always grips with the FIXED
+  jaw under the plate (moving jaw on top) — boxes calibrated jaw-on-top are flipped 180° about the tool axis, grip
+  point moved to the plate's bottom face (jaw on top needs wrist roll ~180°, at its limit). Box list shows both. A level grip only reaches with the grip point ≥ ~25 cm from the swivel. Calibrate = motors off, that
   grip by hand → Calibration tab "Add box". Box move: free move to 50 mm above the spot in front of the tab
   (arm checked against the box itself too), straight down, in level along the tab (22 mm), grip (no width check: plate
   2 mm / wall ~0.5 mm), straight up 30 mm, then either **direct** (swing to above the destination; a higher

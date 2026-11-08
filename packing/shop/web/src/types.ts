@@ -173,6 +173,8 @@ export interface BoxInfo {
   order_id: number | null;
   pose?: Mat4; // box frame at its current location: origin bottom center, z up, tab along -y (robot frame, m)
   report: { tilt_deg?: number; bottom_mm?: number };
+  fixed_jaw_calibrated?: "top" | "bottom"; // where the fixed jaw was when calibrated
+  fixed_jaw_used?: "top" | "bottom"; // where planning puts it (boxes.fixed_jaw)
   created_at: string;
 }
 

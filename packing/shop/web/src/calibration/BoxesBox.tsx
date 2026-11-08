@@ -64,7 +64,9 @@ export default function BoxesBox({ arm, boxes, apply }: {
                   <td>{WHERE[b.location]}</td>
                   <td>{b.state === "in_use" ? `order ${b.order_id}` : STATE[b.state]}</td>
                   <td className="sub">{b.pose ? `${(b.pose[0][3] * 1000).toFixed(0)}, ${(b.pose[1][3] * 1000).toFixed(0)} mm` : "—"}
-                    {b.report?.tilt_deg != null && ` · tilt ${b.report.tilt_deg}°`}</td>
+                    {b.report?.tilt_deg != null && ` · tilt ${b.report.tilt_deg}°`}
+                    {b.fixed_jaw_calibrated && ` · fixed jaw ${b.fixed_jaw_calibrated}` +
+                      (b.fixed_jaw_used && b.fixed_jaw_used !== b.fixed_jaw_calibrated ? ` (gripped ${b.fixed_jaw_used})` : "")}</td>
                   <td className="btns">
                     {(b.location !== "supply" || b.state !== "available") && b.state !== "in_use" && (
                       <button className="act" disabled={busy !== null} title="Someone put it back, empty, at its left spot"

@@ -647,6 +647,10 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         listed = []
         for b in boxes.list():
             d = b.to_dict()
+            from ..boxes.geometry import fixed_jaw_side
+
+            d["fixed_jaw_calibrated"] = fixed_jaw_side(b.tool_in_box)  # planning flips it per boxes.fixed_jaw
+            d["fixed_jaw_used"] = cfg.boxes.fixed_jaw if cfg.boxes.fixed_jaw in ("top", "bottom") else d["fixed_jaw_calibrated"]
             if pan is not None:
                 d["pose"] = box_pose(b, b.location, cfg, pan).round(6).tolist()
             listed.append(d)
@@ -683,6 +687,9 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
         for ob in _obstacles(pan):  # 3D: a box may sit under the tray's overhang, not inside it
             if blocks_intersect(box_block(T_box), ob, 0.0025):
                 raise HTTPException(422, f"that box would overlap {ob.name} — is it already calibrated?")
+        from ..boxes.geometry import fixed_jaw_side
+
+        report["fixed_jaw"] = fixed_jaw_side(np.linalg.inv(T_box) @ T_tool)  # as calibrated (planning may flip it)
         b = boxes.add(T_box, np.linalg.inv(T_box) @ T_tool, body, report)
         c = T_box[:3, 3] * 1000
         events.record("robot", f"Box {b.id} added at ({c[0]:.0f}, {c[1]:.0f}) mm", box_id=b.id, **report)

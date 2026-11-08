@@ -31,7 +31,7 @@ from ..motion.kinematics import POSITION_TOL_M, ArmModel, PathError
 from ..motion.program import ProgramBuilder, Step, describe
 from ..tray.pick import AxisIK, best_targets
 from .geometry import (TAB_T, Block, block_footprint, block_top, blocks_intersect, box_block, box_frame, box_tilt_deg,
-                       footprint, mirror, overlaps, point_in_block)
+                       footprint, mirror, overlaps, point_in_block, with_fixed_jaw)
 from .store import Box
 
 MAX_CARRY_TILT_DEG = 30.0  # box tilt while carrying (user: tilting is fine; a packed box may hold parts)
@@ -190,8 +190,14 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     low as possible (`carry_mm`); if the swing passes near an obstacle the box goes OVER it — by a higher straight
     lift if that's low, else by arcing up and in toward the swivel, swinging high and arcing back down.
     Raises PathError if any part is unreachable, over a joint limit, too tilted or would collide."""
+    import dataclasses
+
     pan_xy = model.pan_xy
     obstacles = obstacles or []
+    # grip with the fixed jaw where configured (default under the plate: wrist roll ~0, far from its limit)
+    grip = with_fixed_jaw(box.tool_in_box, cfg.boxes.fixed_jaw)
+    flipped = grip is not box.tool_in_box
+    box = dataclasses.replace(box, tool_in_box=grip, joints={} if flipped else box.joints)  # (capture joints: old grip)
     T_land_box = box_pose(box, dst, cfg, pan_xy)
     for where in (src, dst):
         if why := too_close(box_pose(box, where, cfg, pan_xy), pan_xy, cfg):

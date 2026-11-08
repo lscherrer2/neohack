@@ -99,6 +99,39 @@ class BlockTests(unittest.TestCase):
         self.assertFalse(blocks_intersect(a, Block("r", T2, np.array([0.02, 0.02, 0.02]))))
 
 
+class FixedJawTests(unittest.TestCase):
+    def jaw_top_grip(self):
+        """The calibrated grip with the fixed jaw ON TOP of the plate (tool x up, tool point on the plate's top)."""
+        T = tool_in_box()  # fixed jaw under: x down, tool point on the plate's bottom face
+        T2 = T.copy()
+        T2[:3, 0], T2[:3, 1] = -T[:3, 0], -T[:3, 1]
+        T2[:3, 3] = T[:3, 3] + np.array([0, 0, TAB_T])
+        return T2
+
+    def test_flip_puts_fixed_jaw_under_on_the_bottom_face(self):
+        from packing.boxes.geometry import fixed_jaw_side, with_fixed_jaw
+
+        top = self.jaw_top_grip()
+        self.assertEqual(fixed_jaw_side(top), "top")
+        flipped = with_fixed_jaw(top, "bottom")
+        self.assertEqual(fixed_jaw_side(flipped), "bottom")
+        np.testing.assert_allclose(flipped, tool_in_box(), atol=1e-12)  # same as calibrating it jaw-under
+        g = tool_in_box()
+        self.assertIs(with_fixed_jaw(g, "bottom"), g)  # already jaw-under: unchanged
+        np.testing.assert_allclose(with_fixed_jaw(top, "as_calibrated"), top)
+
+    def test_jaw_top_box_plans_with_wrist_roll_near_zero(self):
+        cfg = load_config(temp_config(Path(tempfile.mkdtemp())))
+        box = Box(1, "available", "supply", None, box_frame((0.32, 0.16), 0.0, PAN), self.jaw_top_grip(), {}, {}, "", "")
+        plan = plan_box_move(MODEL, box, "supply", "pack", HOME, cfg)
+        grasp = plan.steps[3].path[-1]
+        self.assertLess(abs(grasp["wrist_roll"]), 30)  # fixed jaw under -> roll near 0, not near its ±100 limit
+        T = MODEL.fk(grasp)
+        self.assertLess(T[2, 0], -0.9)  # tool x (toward the fixed jaw) points down
+        want = box.supply[:3, 3] + box.supply[:3, :3] @ tool_in_box()[:3, 3]
+        self.assertLess(np.linalg.norm(T[:3, 3] - want) * 1000, 4.0)  # at the plate's bottom face
+
+
 class StoreTests(unittest.TestCase):
     def test_take_reuse_and_lifecycle(self):
         s = BoxStore(OrderStore(":memory:"))

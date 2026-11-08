@@ -93,6 +93,24 @@ def box_from_grasp(T_tool: np.ndarray, pan_xy: np.ndarray, g: GripCfg = GripCfg(
                    "bottom_mm": round(bottom * 1000, 1)}
 
 
+def fixed_jaw_side(tool_in_box: np.ndarray) -> str:
+    """'top' or 'bottom': which side of the tab plate the FIXED jaw is on in this grasp (it sits toward tool +x)."""
+    return "top" if float(tool_in_box[2, 0]) > 0 else "bottom"
+
+
+def with_fixed_jaw(tool_in_box: np.ndarray, side: str) -> np.ndarray:
+    """The same grip with the fixed jaw on `side` of the plate ('top' / 'bottom'; anything else: unchanged).
+    Flipping = 180° about the gripper's axis (tool z), and the tool point (the fixed jaw's face) moves to the other
+    face of the 2 mm plate."""
+    if side not in ("top", "bottom") or fixed_jaw_side(tool_in_box) == side:
+        return tool_in_box
+    T = tool_in_box.copy()
+    T[:3, 0], T[:3, 1] = -tool_in_box[:3, 0], -tool_in_box[:3, 1]
+    # the plate lies on the tool −x side of the fixed jaw's face: the other face is TAB_T further along −x
+    T[:3, 3] = tool_in_box[:3, 3] - tool_in_box[:3, 0] * TAB_T
+    return T
+
+
 def box_tilt_deg(T_tool: np.ndarray, tool_in_box: np.ndarray) -> float:
     """How far the box's up axis is from vertical when the tool is at T_tool holding it with this grasp."""
     z = (T_tool @ np.linalg.inv(tool_in_box))[:3, 2]
