@@ -226,7 +226,8 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
     seeds = ([box.joints] if box.joints else []) + reach_seeds(model, above_back)
     targets, poses = best_targets(model, ik, above_back, T_src[:3, 2], T_src[:3, 0], seeds)
     start_pose = dict(b.pose)
-    move = b.joint_to(targets[0], f"above the spot in front of box {box.id}'s tab", seeds=poses, targets=targets[:1])
+    move = b.joint_to(targets[0], f"above the spot in front of box {box.id}'s tab", seeds=poses, targets=targets[:1],
+                      speed=bc.free_speed)
     travel = max(abs(move.pose[j] - b.start[j]) for j in move.pose)
     this_box = box_block(box_pose(box, src, cfg, pan_xy), f"box {box.id} itself")
     def near_this_box(q: dict) -> bool:
@@ -287,7 +288,7 @@ def plan_box_move(model: ArmModel, box: Box, src: str, dst: str, current: dict[s
             a = c
         nonlocal worst
         worst = max(worst, check_path(model, box, [prev, *dense], obstacles, label))
-        b.path(dense, bc.line_speed_mm_s, label)
+        b.path(dense, bc.carry_speed_mm_s, label)
         return b.pose
 
     def ease_out(t: float) -> float:  # fast first: rise early / move out early

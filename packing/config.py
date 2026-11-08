@@ -117,8 +117,10 @@ class BoxesCfg:
     # back-out along the tab runs into the arm's reach limit (sim: 304 ok, 302 fails)
     approach_mm: float = 22.0  # open jaws come in level along the tab from this far back (and back out after):
     # clears the tab tip (~15 mm behind the grip point + jaw tips); longer runs below the ~25 cm level-grip limit
-    line_speed_mm_s: float = 25.0  # straight moves with / near a box
-    down_speed_mm_s: float = 12.0  # the last bit down onto the tab / the table
+    line_speed_mm_s: float = 60.0  # straight lifts / slides along the tab (user: 2–3x faster, was 25)
+    down_speed_mm_s: float = 30.0  # the last bit down onto the tab / the table (was 12)
+    carry_speed_mm_s: float = 75.0  # guided carries: arcs up/down, the swing around high (was 25)
+    free_speed: float = 30.0  # free joint moves in box moves, units/s (was half the motion speed: 15)
 
 
 @dataclass

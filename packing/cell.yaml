@@ -63,8 +63,10 @@ boxes:
                            # along the tab can't be reached). Add box refuses closer boxes
   approach_mm: 22          # open jaws come in level along the tab from this far back, and back out after (clears the
                            # tab tip; much longer would bring the grip point under the ~25 cm level-grip limit)
-  line_speed_mm_s: 25
-  down_speed_mm_s: 12
+  line_speed_mm_s: 60      # straight lifts / slides along the tab (2.5x the first cautious 25)
+  down_speed_mm_s: 30      # last bit down onto the tab / the table
+  carry_speed_mm_s: 75     # guided carries: arcs up and down, the swing around high
+  free_speed: 30           # free joint moves in box moves (units/s)
 
 max_items_per_order: 10    # items one order (= one box) may hold
 box_slots:                 # drop spots inside the box *at the pack station*, filled in order;
