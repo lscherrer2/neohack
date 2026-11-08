@@ -44,6 +44,20 @@ tray:
 
 # catalog: (sku -> spoken name) defaults to the tray type names above
 
+# Packing boxes (box.step): calibrated by hand — motors off, jaws closed on the tab, "Add box" (Calibration tab).
+# Each box's tab faces the arm's swivel; supply boxes sit on the LEFT, packed ones go to the mirrored spot on the
+# right. Plan: .claude/plans/boxes_and_reservations.md
+boxes:
+  grip_from_top_mm: 10     # where the tool point sits on the tab when calibrating (estimate: drawing/drops only)
+  grip_from_wall_mm: 11
+  pack_spot_mm: [260, 0]   # box center (robot x, y) where an order is packed: middle of the sweep. 260 = flattest
+                           # set-down in sim (2.8°; 220 tilted 7°: too close to the base), 7 cm short of the tray
+  carry_mm: 30             # lift boxes straight up this far before moving them (no dragging). Kept low: pointing
+                           # straight down, wrist_flex hits its stop ~10 cm up near the base (higher = box tilts)
+  approach_mm: 30          # open jaws come straight down onto the tab from this far above
+  line_speed_mm_s: 25
+  down_speed_mm_s: 12
+
 max_items_per_order: 10    # items one order (= one box) may hold
 box_slots:                 # drop spots inside the box *at the pack station*, filled in order;
   - {pose: box_slot_1}     # with fewer spots than items they repeat (item i -> spot i % len). Any sku

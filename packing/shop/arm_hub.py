@@ -234,6 +234,12 @@ class ArmHub:
 
     def read_tip(self, samples: int = 5, sleep: Callable[[float], None] = time.sleep) -> np.ndarray:
         """Tip position (robot frame, m) averaged over a few reads (hand tremor)."""
+        pose = self.read_pose(samples, sleep)
+        with self._lock:
+            return np.asarray(self.model.tip(pose), float)
+
+    def read_pose(self, samples: int = 5, sleep: Callable[[float], None] = time.sleep) -> dict[str, float]:
+        """Joint pose averaged over a few reads (hand tremor)."""
         if self.model is None:
             raise ArmBusy("kinematics unavailable (placo not installed?)")
         reads = []
@@ -243,6 +249,4 @@ class ArmHub:
                     raise ArmBusy("arm not connected")
                 reads.append(self.arm.read())
             sleep(0.02)
-        pose = {j: float(np.mean([r[j] for r in reads])) for j in reads[0]}
-        with self._lock:
-            return np.asarray(self.model.tip(pose), float)
+        return {j: float(np.mean([r[j] for r in reads])) for j in reads[0]}

@@ -23,6 +23,12 @@ class GripperCfg:
     jaw_length_mm: float = 80.0  # jaw pivot -> fingertip (URDF estimate; measure to refine)
     deg_per_unit: float = 1.27  # jaw degrees per gripper unit (load_config fills it from the calibration range)
 
+    def units_for(self, width_mm: float) -> float:
+        """Gripper units from closed at which the fingertips are `width_mm` apart (chord model, see open_for)."""
+        import math
+
+        return math.degrees(2 * math.asin(min(1.0, width_mm / (2 * self.jaw_length_mm)))) / self.deg_per_unit
+
     def open_for(self, width_mm: float) -> float:
         """Gripper value that opens the fingertips `width_mm + open_margin_mm` apart (capped at `open`).
         Fingertip gap ~ chord 2 L sin(angle / 2); unit 0 = closed (jaws touching)."""
@@ -96,6 +102,21 @@ class TrayCfg:
 
 
 @dataclass
+class BoxesCfg:
+    """Packing boxes (packing/boxes/): calibration grip estimate, pack spot, carry motion."""
+
+    grip_from_top_mm: float = 10.0  # tool point below the box top when the jaws are closed on the tab
+    grip_from_wall_mm: float = 11.0  # tool point out from the box wall along the tab
+    pack_spot_mm: tuple[float, float] = (260.0, 0.0)  # box center (robot x, y) where orders are packed; 260 =
+    # flattest set-down in sim (2.8° tilt; 220 mm gave 7° — too close to the base), 7 cm short of the tray
+    carry_mm: float = 30.0  # lift the box straight up this far before moving it (no dragging). Low on purpose:
+    # pointing straight down, wrist_flex hits its stop ~10 cm above the table near the base — higher tilts the box
+    approach_mm: float = 30.0  # open jaws come straight down onto the tab from this far above
+    line_speed_mm_s: float = 25.0  # straight moves with / near a box
+    down_speed_mm_s: float = 12.0  # the last bit down onto the tab / the table
+
+
+@dataclass
 class CellConfig:
     port: str
     robot_id: str
@@ -112,6 +133,7 @@ class CellConfig:
     gripper: GripperCfg = field(default_factory=GripperCfg)
     motion: MotionCfg = field(default_factory=MotionCfg)
     tray: TrayCfg | None = None
+    boxes: BoxesCfg = field(default_factory=BoxesCfg)
 
     @property
     def stock_slots(self) -> dict[str, str]:
@@ -157,6 +179,7 @@ def load_config(path: str | Path) -> CellConfig:
         gripper=GripperCfg(**(raw.get("gripper") or {})),
         motion=MotionCfg(**(raw.get("motion") or {})),
         tray=_load_tray(raw.get("tray"), rel),
+        boxes=_load_boxes(raw.get("boxes")),
     )
     try:  # jaw degrees per gripper unit from the calibrated range (0..100 spans range_min..range_max)
         from .hardware.so101 import load_calibration
@@ -178,6 +201,13 @@ def _mode(mode: str) -> str:
     if mode not in CALIBRATION_MODES:
         raise ValueError(f"tray.calibration_mode must be one of {CALIBRATION_MODES}, not {mode!r}")
     return mode
+
+
+def _load_boxes(raw: dict | None) -> BoxesCfg:
+    raw = dict(raw or {})
+    if "pack_spot_mm" in raw:
+        raw["pack_spot_mm"] = tuple(float(v) for v in raw["pack_spot_mm"])
+    return BoxesCfg(**raw)
 
 
 def _load_tray(raw: dict | None, rel) -> TrayCfg | None:

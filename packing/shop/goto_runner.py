@@ -99,6 +99,8 @@ class GotoRunner:
                 steps = [JointMove(s.pose, s.speed or slow, s.label) if isinstance(s, JointMove) else s
                          for s in plan.steps]
                 run(steps, motion, on_step=lambda s: self.last.update(step=s.label))
+            if getattr(plan, "on_done", None):  # e.g. record where a box now is
+                plan.on_done()
             self.last["status"] = "done"
             widths = [round(s.measured, 1) for s in steps if isinstance(s, Grip) and s.measured is not None]
             if widths:

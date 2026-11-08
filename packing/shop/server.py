@@ -21,12 +21,18 @@
   POST /api/arm/release         {"confirm_hold": true} motors off again during calibration (after a go-to)
   POST /api/arm/torque          {"on": bool, "confirm_hold": bool} lock / release the motors while idle (Controls)
   POST /api/arm/pick            {"pocket", "confirm_move"} test pick: dry run, then run (same runner/Stop as go-to)
+  GET  /api/boxes               calibrated packing boxes (+ pose at their location, pack spot, geometry)
+  POST /api/boxes/capture       motors off, jaws closed on a box tab: add that box
+  DELETE /api/boxes/{id}        remove a box record;  POST /api/boxes/{id}/reset: back to available at supply
+  POST /api/arm/box-move        {"box_id", "to": supply|pack|output, "confirm_move"} move a box by its tab
   /api/calibration[...]         tray calibration from the dashboard (start, mode corners|pockets, capture, points,
                                 save, finish)
   POST /robot/telemetry         joints from a robot agent running in its own process
 """
 
 from __future__ import annotations
+
+import numpy as np
 
 import asyncio
 import json
@@ -140,6 +146,12 @@ class PickIn(BaseModel):
 class TorqueIn(BaseModel):
     on: bool  # True = lock (motors on, hold where it is), False = release (limp)
     confirm_hold: bool = False  # required to release: the arm drops
+
+
+class BoxMoveIn(BaseModel):
+    box_id: int
+    to: str  # supply | pack | output
+    confirm_move: bool = False  # False = plan only (dry run), True = move
 
 
 class ModeIn(BaseModel):
@@ -579,6 +591,146 @@ def create_server(store: OrderStore, catalog: Catalog, events: EventLog | None =
             raise HTTPException(409, str(e)) from e
         events.record("robot", "Motors OFF again for hand-guided capture")
         return _arm_state()
+
+    # ---------------- packing boxes (packing/boxes/)
+    from ..boxes.geometry import BOX_H, BOX_W, TAB_OUT, TAB_W, CaptureError, GripCfg, box_from_grasp, footprint, overlaps
+    from ..boxes.move import box_pose, plan_box_move
+    from ..boxes.store import BoxError, BoxStore
+
+    boxes = BoxStore(store)
+
+    def _box_cfg():
+        if shelf is None:
+            raise HTTPException(404, "no cell config")
+        return shelf.cfg
+
+    def _pan_xy():
+        h = _hub()
+        if h.model is None:
+            raise HTTPException(503, "kinematics unavailable (placo not installed?)")
+        return h.model.pan_xy
+
+    def _box_poses(pan_xy) -> dict[int, np.ndarray]:
+        cfg = _box_cfg()
+        return {b.id: box_pose(b, b.location, cfg, pan_xy) for b in boxes.list()}
+
+    def _obstacles(pan_xy, skip: int | None = None) -> list[tuple[str, np.ndarray]]:
+        """Footprints (table plane) of the other boxes and of the parts tray."""
+        out = [(f"box {bid}", footprint(T, margin=0.005)) for bid, T in _box_poses(pan_xy).items() if bid != skip]
+        tray = getattr(_box_cfg(), "tray", None)
+        cal = tray.calibration() if tray else None
+        if cal:
+            o = tray.layout().outline
+            corners = [cal.to_robot(x, y)[:2] for x, y in ((o["xmin"], o["ymin"]), (o["xmax"], o["ymin"]),
+                                                            (o["xmax"], o["ymax"]), (o["xmin"], o["ymax"]))]
+            out.append(("the parts tray", np.array(corners)))
+        return out
+
+    def _boxes_state() -> dict:
+        h = _hub()
+        pan = h.model.pan_xy if h.model is not None else None
+        cfg = _box_cfg()
+        listed = []
+        for b in boxes.list():
+            d = b.to_dict()
+            if pan is not None:
+                d["pose"] = box_pose(b, b.location, cfg, pan).round(6).tolist()
+            listed.append(d)
+        px, py = cfg.boxes.pack_spot_mm
+        return {"boxes": listed, "pack_spot_mm": [px, py],
+                "geometry": {"w_m": BOX_W, "h_m": BOX_H, "tab_w_m": TAB_W, "tab_out_m": TAB_OUT}}
+
+    @app.get("/api/boxes")
+    def boxes_state():
+        return _boxes_state()
+
+    @app.post("/api/boxes/capture")
+    def boxes_capture():
+        """Motors off, jaws closed on a box tab (gripper pointing down): add that box."""
+        h, cfg = _hub(), _box_cfg()
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.torque:
+            raise HTTPException(409, "release the motors first (hold the arm), then close the jaws on the tab by hand")
+        pan = _pan_xy()
+        try:
+            q = h.read_pose()
+            body = {j: v for j, v in q.items() if j != "gripper"}
+            with h._lock:
+                T_tool = h.model.fk(body)
+            g = GripCfg(cfg.boxes.grip_from_top_mm, cfg.boxes.grip_from_wall_mm)
+            T_box, report = box_from_grasp(T_tool, pan, g)
+        except (ArmBusy, CaptureError) as e:
+            raise HTTPException(409 if isinstance(e, ArmBusy) else 422, str(e)) from e
+        if T_box[1, 3] < pan[1]:
+            raise HTTPException(422, "that box is on the right of the arm — supply boxes go on the LEFT")
+        for name, fp in _obstacles(pan):
+            if overlaps(footprint(T_box, margin=0.005), fp):
+                raise HTTPException(422, f"that box would overlap {name} — is it already calibrated?")
+        b = boxes.add(T_box, np.linalg.inv(T_box) @ T_tool, body, report)
+        c = T_box[:3, 3] * 1000
+        events.record("robot", f"Box {b.id} added at ({c[0]:.0f}, {c[1]:.0f}) mm", box_id=b.id, **report)
+        return _boxes_state()
+
+    @app.delete("/api/boxes/{box_id}")
+    def boxes_remove(box_id: int):
+        try:
+            boxes.remove(box_id)
+        except BoxError as e:
+            raise HTTPException(409 if "in use" in str(e) else 404, str(e)) from e
+        events.record("robot", f"Box {box_id} removed", box_id=box_id)
+        return _boxes_state()
+
+    @app.post("/api/boxes/{box_id}/reset")
+    def boxes_reset(box_id: int):
+        """A person put the box back, empty, at its supply spot."""
+        try:
+            b = boxes.get(box_id)
+        except BoxError as e:
+            raise HTTPException(404, str(e)) from e
+        if b.state == "in_use":
+            raise HTTPException(409, f"box {box_id} is in use by order {b.order_id}")
+        boxes.update(box_id, location="supply", state="available", order_id=None)
+        events.record("robot", f"Box {box_id} back at its supply spot (empty)", box_id=box_id)
+        return _boxes_state()
+
+    @app.post("/api/arm/box-move")
+    def arm_box_move(body: BoxMoveIn):
+        """Move a box by its tab (dry run unless confirm_move). Records its new location when done."""
+        from ..motion.kinematics import PathError
+
+        h, cfg = _hub(), _box_cfg()
+        if body.to not in ("supply", "pack", "output"):
+            raise HTTPException(400, "to must be supply, pack or output")
+        if not h.connected:
+            raise HTTPException(409, "connect the arm first")
+        if h.mode in ("packing", "moving") or (goto_state["runner"] and goto_state["runner"].running):
+            raise HTTPException(409, f"the arm is {h.mode}; wait for it to finish")
+        try:
+            b = boxes.get(body.box_id)
+        except BoxError as e:
+            raise HTTPException(404, str(e)) from e
+        if b.location == body.to:
+            raise HTTPException(409, f"box {b.id} is already at {body.to}")
+        joints = h.state()["joints"]
+        if not joints:
+            raise HTTPException(409, "no arm reading yet")
+        pan = _pan_xy()
+        try:
+            with h._lock:
+                plan = plan_box_move(h.model, b, b.location, body.to, joints, cfg, _obstacles(pan, skip=b.id))
+        except PathError as e:
+            raise HTTPException(422, f"can't plan that box move: {e}") from e
+
+        def moved(box_id=b.id, to=body.to):
+            boxes.update(box_id, location=to)
+            events.record("robot", f"Box {box_id} is now at {to}", box_id=box_id)
+        plan.on_done = moved
+        out = {"plan": plan.summary(), "motors_will_turn_on": not h.torque, "started": False}
+        if body.confirm_move:
+            _runner().start(plan)
+            out["started"] = True
+        return out
 
     @app.get("/api/calibration")
     def calibration_state():

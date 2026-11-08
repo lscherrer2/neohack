@@ -132,11 +132,13 @@ class ProgramBuilder:
         self.pose = q
         return step
 
-    def line_to(self, p_m: np.ndarray, speed_mm_s: float, label: str) -> LineMove:
-        """Straight line from the current tip to point `p_m` (meters), tool orientation held."""
+    def line_to(self, p_m: np.ndarray, speed_mm_s: float, label: str, orientation_weight: float = 0.05) -> LineMove:
+        """Straight line from the current tip to point `p_m` (meters), tool orientation held (softly:
+        `orientation_weight` trades orientation for position accuracy)."""
         start_tip = self.tip
         try:
-            path = self.model.line(self.pose, np.asarray(p_m, float), limit=JOINT_LIMIT)
+            path = self.model.line(self.pose, np.asarray(p_m, float), limit=JOINT_LIMIT,
+                                   orientation_weight=orientation_weight)
         except PathError as e:
             raise PathError(f"{label}: {e}") from e
         step = LineMove(path, float(np.linalg.norm(np.asarray(p_m) - start_tip) * 1000), speed_mm_s, label)
@@ -144,9 +146,9 @@ class ProgramBuilder:
         self.pose = path[-1]
         return step
 
-    def line_by(self, d_m: np.ndarray, speed_mm_s: float, label: str) -> LineMove:
+    def line_by(self, d_m: np.ndarray, speed_mm_s: float, label: str, orientation_weight: float = 0.05) -> LineMove:
         """Straight line by offset `d_m` (meters, robot frame) from the current tip."""
-        return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label)
+        return self.line_to(self.tip + np.asarray(d_m, float), speed_mm_s, label, orientation_weight)
 
     def open_gripper(self, label: str = "open gripper", value: float | None = None) -> OpenGripper:
         step = OpenGripper(label, value)
